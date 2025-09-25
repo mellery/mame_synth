@@ -7,7 +7,7 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
 2. **Set up git repository with MAME submodule** ✅ - Initialize project structure with MAME as a submodule
 
 ## Phase 2: Core Architecture
-3. **Set up build system and MAME integration** - Configure build to link against MAME libraries and handle dependencies
+3. **Set up build system and MAME integration** ✅ - Configure build to link against MAME libraries and handle dependencies
 4. **Create minimal machine context stub** - Build lightweight machine/device context for MAME audio devices
 5. **Design MIDI/MusicXML parser interface** - Create abstraction for reading and parsing music files
 6. **Create audio device abstraction layer** - Build interface between sequencer and MAME's device_sound_interface
@@ -18,6 +18,7 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
 ## Phase 3: Audio Device Implementation
 10. **Write tests for MIDI/MusicXML parsers** - Unit tests for file parsing and data validation
 11. **Implement MAME device initialization system** - Create device factory and sound_manager integration
+11a. **Add MAME utility library dependencies** - Link required MAME utility and core libraries for device operation
 12. **Implement NES APU wrapper class** - Wrap nesapu_device with simplified interface for external use
 13. **Create NES APU note mapping** - Map MIDI notes to NES APU register writes (squares, triangle, noise)
 14. **Write tests for NES APU driver** - Unit tests for device initialization and audio output
