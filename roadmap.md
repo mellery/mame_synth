@@ -8,21 +8,21 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
 
 ## Phase 2: Core Architecture
 3. **Set up build system and MAME integration** ✅ - Configure build to link against MAME libraries and handle dependencies
-4. **Create minimal machine context stub** - Build lightweight machine/device context for MAME audio devices
+4. **Create minimal machine context stub** ✅ - Build lightweight machine/device context for MAME audio devices
 5. **Design MIDI/MusicXML parser interface** - Create abstraction for reading and parsing music files
-6. **Create audio device abstraction layer** - Build interface between sequencer and MAME's device_sound_interface
+6. **Create audio device abstraction layer** - Build interface leveraging handle-based pattern from machine stub
 7. **Design note-to-register mapping system** - Create translation layer from MIDI notes to device register writes
-8. **Set up unit testing framework** - Configure testing infrastructure for the project
+8. **Set up unit testing framework** - Configure testing with initialization/operation/cleanup phases
 9. **Address licensing requirements** - Set up GPL compliance for NES APU usage
 
 ## Phase 3: Audio Device Implementation
 10. **Write tests for MIDI/MusicXML parsers** - Unit tests for file parsing and data validation
-11. **Implement MAME device initialization system** - Create device factory and sound_manager integration
+11. **Implement MAME device initialization system** - Extend existing factory pattern with real MAME device instantiation
 11a. **Add MAME utility library dependencies** - Link required MAME utility and core libraries for device operation
-12. **Implement NES APU wrapper class** - Wrap nesapu_device with simplified interface for external use
+12. **Implement NES APU wrapper class** - Replace handle-based stub with actual nesapu_device integration
 13. **Create NES APU note mapping** - Map MIDI notes to NES APU register writes (squares, triangle, noise)
 14. **Write tests for NES APU driver** - Unit tests for device initialization and audio output
-15. **Implement SNES S-DSP wrapper class** - Wrap s_dsp_device with external interface
+15. **Implement SNES S-DSP wrapper class** - Replace handle-based stub with actual s_dsp_device integration
 16. **Create SNES S-DSP note mapping** - Map MIDI notes to S-DSP sample loading and playback
 17. **Write tests for SNES S-DSP driver** - Unit tests for SNES audio functionality
 18. **Add support for other MAME synth devices** - Extend to FM synths (YM2612, OPL3), PSG chips, etc.
@@ -47,6 +47,15 @@ This approach leverages MAME's extensive collection of accurately emulated audio
 ## Key Architectural Decisions
 - **Minimal MAME Integration**: Use only audio devices without full machine emulation
 - **Stream-Based Architecture**: Leverage MAME's sound_stream system for real-time audio
+- **Handle-Based Development**: Incremental MAME integration using opaque handles during development
+- **Factory Pattern**: Centralized device creation and lifecycle management
 - **Device Wrapper Pattern**: Abstract MAME device complexity behind simplified interfaces
 - **Register Translation Layer**: Convert MIDI events to device-specific register operations
+- **Exception-Based Error Handling**: Robust initialization and cleanup error management
 - **Modular Licensing**: Handle mixed GPL/LGPL/BSD licensing requirements appropriately
+
+## Development Strategy Insights
+- **Validated Incremental Approach**: Handle-based stubs allow development without premature MAME coupling
+- **Established Infrastructure**: Machine context and factory patterns ready for real device integration
+- **Clear Integration Points**: TODO placeholders mark exactly where MAME library linking will occur
+- **Testing Framework Ready**: Initialization/operation/cleanup phases provide clear test boundaries
