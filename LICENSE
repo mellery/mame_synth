@@ -1,0 +1,43 @@
+MAME Synth - Music Player for MAME Audio Devices
+Copyright (C) 2024 MAME Synth Contributors
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+================================================================================
+
+This project uses MAME (Multiple Arcade Machine Emulator) as a submodule,
+which is licensed under the GNU General Public License version 2.
+
+MAME
+Copyright (c) 1997-2025 MAMEdev and contributors
+Licensed under GPL-2.0
+Source: https://github.com/mamedev/mame
+
+The complete GPL-2.0 license text can be found in mame/docs/legal/GPL-2.0
+
+================================================================================
+
+THIRD PARTY LICENSES:
+
+This project may include code or concepts derived from various sources.
+Individual source files may contain additional copyright notices and license
+information as required by their respective licenses.
+
+================================================================================
+
+TRADEMARK NOTICE:
+
+MAME is a registered trademark of Gregory Ember. This project is not
+affiliated with or endorsed by MAMEdev or Gregory Ember.

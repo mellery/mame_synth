@@ -1,0 +1,76 @@
+{
+  "config_version": "1.0",
+  "config_name": "authentic",
+  "description": "Hardware-accurate NES configuration for authentic retro sound",
+  "created_timestamp": 1735241400,
+  "modified_timestamp": 1735241400,
+  "hardware": {
+    "cpu_clock_rate": 1789773,
+    "enable_cycle_accurate_timing": true,
+    "enable_frame_accurate_timing": true,
+    "region": "NTSC"
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "buffer_size": 1024,
+    "enable_nonlinear_mixing": true,
+    "enable_highpass_filter": true,
+    "enable_lowpass_filter": true,
+    "pulse1_volume_scale": 1.0,
+    "pulse2_volume_scale": 1.0,
+    "triangle_volume_scale": 0.9,
+    "noise_volume_scale": 0.7,
+    "dmc_volume_scale": 0.5,
+    "quality": "authentic"
+  },
+  "channels": [
+    {
+      "type": "pulse1",
+      "enabled": true,
+      "volume": 1.0,
+      "pan": 0.0,
+      "muted": false
+    },
+    {
+      "type": "pulse2",
+      "enabled": true,
+      "volume": 1.0,
+      "pan": 0.0,
+      "muted": false
+    },
+    {
+      "type": "triangle",
+      "enabled": true,
+      "volume": 1.0,
+      "pan": 0.0,
+      "muted": false
+    },
+    {
+      "type": "noise",
+      "enabled": true,
+      "volume": 1.0,
+      "pan": 0.0,
+      "muted": false
+    },
+    {
+      "type": "dmc",
+      "enabled": true,
+      "volume": 1.0,
+      "pan": 0.0,
+      "muted": false
+    }
+  ],
+  "performance": {
+    "enable_multithreading": false,
+    "worker_thread_count": 1,
+    "audio_buffer_count": 3,
+    "sample_cache_size_mb": 8,
+    "max_polyphony": 5
+  },
+  "ui": {
+    "verbose_output": true,
+    "use_progress_bars": true,
+    "enable_colored_output": true,
+    "log_level": "debug"
+  }
+}

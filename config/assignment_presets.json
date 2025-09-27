@@ -1,0 +1,289 @@
+{
+  "nes_channel_assignment_presets": {
+    "format_version": "1.0",
+    "description": "Predefined channel assignment configurations for different musical styles",
+
+    "strategies": {
+      "authentic_nes": {
+        "name": "Authentic NES",
+        "description": "Mimics original NES game music channel usage patterns",
+        "weights": {
+          "frequency": 0.30,
+          "role": 0.50,
+          "density": 0.10,
+          "dynamics": 0.10
+        },
+        "settings": {
+          "allow_multiple_melodies": false,
+          "prefer_triangle_for_bass": true,
+          "auto_detect_drums": true,
+          "balance_pulse_channels": true
+        },
+        "role_preferences": {
+          "melody": [0.9, 0.7, 0.3, 0.1, 0.2],
+          "harmony": [0.7, 0.9, 0.4, 0.1, 0.3],
+          "bass": [0.2, 0.2, 0.9, 0.1, 0.7],
+          "percussion": [0.1, 0.1, 0.1, 1.0, 0.6],
+          "arpeggio": [0.8, 0.8, 0.5, 0.1, 0.2],
+          "pad": [0.6, 0.7, 0.8, 0.1, 0.4],
+          "counter_melody": [0.6, 0.8, 0.5, 0.1, 0.3],
+          "accent": [0.5, 0.5, 0.3, 0.8, 0.9],
+          "special_effect": [0.4, 0.4, 0.3, 0.9, 0.8]
+        },
+        "frequency_ranges": [
+          {"min": 80, "max": 4000, "optimal": 800},
+          {"min": 80, "max": 4000, "optimal": 600},
+          {"min": 27, "max": 2000, "optimal": 150},
+          {"min": 50, "max": 20000, "optimal": 1000},
+          {"min": 50, "max": 8000, "optimal": 200}
+        ]
+      },
+
+      "modern_chiptune": {
+        "name": "Modern Chiptune",
+        "description": "Optimized for modern chiptune production with creative freedom",
+        "weights": {
+          "frequency": 0.20,
+          "role": 0.30,
+          "density": 0.30,
+          "dynamics": 0.20
+        },
+        "settings": {
+          "allow_multiple_melodies": true,
+          "prefer_triangle_for_bass": true,
+          "auto_detect_drums": true,
+          "balance_pulse_channels": true
+        },
+        "role_preferences": {
+          "melody": [0.8, 0.8, 0.4, 0.1, 0.2],
+          "harmony": [0.8, 0.8, 0.3, 0.1, 0.3],
+          "bass": [0.1, 0.1, 0.9, 0.1, 0.8],
+          "percussion": [0.2, 0.2, 0.1, 1.0, 0.7],
+          "arpeggio": [0.9, 0.9, 0.6, 0.1, 0.2],
+          "pad": [0.5, 0.6, 0.8, 0.2, 0.4],
+          "counter_melody": [0.7, 0.7, 0.4, 0.1, 0.3],
+          "accent": [0.6, 0.6, 0.2, 0.8, 0.9],
+          "special_effect": [0.5, 0.5, 0.3, 0.9, 0.8]
+        },
+        "frequency_ranges": [
+          {"min": 60, "max": 5000, "optimal": 1000},
+          {"min": 60, "max": 5000, "optimal": 700},
+          {"min": 27, "max": 2500, "optimal": 120},
+          {"min": 40, "max": 22000, "optimal": 800},
+          {"min": 40, "max": 10000, "optimal": 150}
+        ]
+      },
+
+      "quality_focused": {
+        "name": "Quality Focused",
+        "description": "Prioritizes audio quality and optimal frequency distribution",
+        "weights": {
+          "frequency": 0.50,
+          "role": 0.20,
+          "density": 0.20,
+          "dynamics": 0.10
+        },
+        "settings": {
+          "allow_multiple_melodies": false,
+          "prefer_triangle_for_bass": true,
+          "auto_detect_drums": true,
+          "balance_pulse_channels": true
+        },
+        "role_preferences": {
+          "melody": [0.9, 0.6, 0.2, 0.0, 0.1],
+          "harmony": [0.6, 0.9, 0.3, 0.0, 0.2],
+          "bass": [0.1, 0.1, 1.0, 0.0, 0.8],
+          "percussion": [0.0, 0.0, 0.0, 1.0, 0.5],
+          "arpeggio": [0.9, 0.7, 0.4, 0.0, 0.1],
+          "pad": [0.5, 0.6, 0.9, 0.0, 0.3],
+          "counter_melody": [0.5, 0.8, 0.4, 0.0, 0.2],
+          "accent": [0.4, 0.4, 0.1, 0.8, 0.9],
+          "special_effect": [0.3, 0.3, 0.2, 0.9, 0.8]
+        },
+        "frequency_ranges": [
+          {"min": 100, "max": 3500, "optimal": 800},
+          {"min": 100, "max": 3500, "optimal": 500},
+          {"min": 30, "max": 1500, "optimal": 120},
+          {"min": 50, "max": 15000, "optimal": 1000},
+          {"min": 50, "max": 6000, "optimal": 180}
+        ]
+      },
+
+      "creative_freedom": {
+        "name": "Creative Freedom",
+        "description": "Maximum flexibility for experimental and unconventional compositions",
+        "weights": {
+          "frequency": 0.15,
+          "role": 0.15,
+          "density": 0.35,
+          "dynamics": 0.35
+        },
+        "settings": {
+          "allow_multiple_melodies": true,
+          "prefer_triangle_for_bass": false,
+          "auto_detect_drums": false,
+          "balance_pulse_channels": false
+        },
+        "role_preferences": {
+          "melody": [0.7, 0.7, 0.7, 0.3, 0.5],
+          "harmony": [0.7, 0.7, 0.7, 0.2, 0.5],
+          "bass": [0.5, 0.5, 0.7, 0.3, 0.8],
+          "percussion": [0.4, 0.4, 0.3, 0.9, 0.8],
+          "arpeggio": [0.8, 0.8, 0.6, 0.2, 0.4],
+          "pad": [0.6, 0.6, 0.8, 0.4, 0.6],
+          "counter_melody": [0.6, 0.6, 0.6, 0.2, 0.4],
+          "accent": [0.6, 0.6, 0.4, 0.7, 0.8],
+          "special_effect": [0.6, 0.6, 0.5, 0.8, 0.9]
+        },
+        "frequency_ranges": [
+          {"min": 50, "max": 6000, "optimal": 1200},
+          {"min": 50, "max": 6000, "optimal": 800},
+          {"min": 25, "max": 3000, "optimal": 200},
+          {"min": 30, "max": 25000, "optimal": 500},
+          {"min": 30, "max": 12000, "optimal": 300}
+        ]
+      },
+
+      "bass_heavy": {
+        "name": "Bass Heavy",
+        "description": "Optimized for bass-heavy music with strong low-end presence",
+        "weights": {
+          "frequency": 0.40,
+          "role": 0.30,
+          "density": 0.15,
+          "dynamics": 0.15
+        },
+        "settings": {
+          "allow_multiple_melodies": false,
+          "prefer_triangle_for_bass": true,
+          "auto_detect_drums": true,
+          "balance_pulse_channels": true
+        },
+        "role_preferences": {
+          "melody": [0.8, 0.6, 0.2, 0.1, 0.1],
+          "harmony": [0.6, 0.8, 0.3, 0.1, 0.2],
+          "bass": [0.1, 0.1, 1.0, 0.0, 0.9],
+          "percussion": [0.2, 0.2, 0.1, 1.0, 0.8],
+          "arpeggio": [0.7, 0.7, 0.4, 0.1, 0.2],
+          "pad": [0.4, 0.5, 0.9, 0.1, 0.6],
+          "counter_melody": [0.5, 0.7, 0.3, 0.1, 0.2],
+          "accent": [0.3, 0.3, 0.2, 0.8, 0.9],
+          "special_effect": [0.2, 0.2, 0.4, 0.8, 0.9]
+        },
+        "frequency_ranges": [
+          {"min": 120, "max": 3000, "optimal": 600},
+          {"min": 120, "max": 3000, "optimal": 400},
+          {"min": 25, "max": 800, "optimal": 80},
+          {"min": 50, "max": 18000, "optimal": 200},
+          {"min": 30, "max": 4000, "optimal": 100}
+        ]
+      },
+
+      "melodic_focus": {
+        "name": "Melodic Focus",
+        "description": "Optimized for complex melodies and intricate musical arrangements",
+        "weights": {
+          "frequency": 0.25,
+          "role": 0.45,
+          "density": 0.25,
+          "dynamics": 0.05
+        },
+        "settings": {
+          "allow_multiple_melodies": true,
+          "prefer_triangle_for_bass": true,
+          "auto_detect_drums": true,
+          "balance_pulse_channels": true
+        },
+        "role_preferences": {
+          "melody": [1.0, 0.8, 0.2, 0.0, 0.1],
+          "harmony": [0.8, 1.0, 0.4, 0.0, 0.2],
+          "bass": [0.1, 0.1, 0.9, 0.0, 0.6],
+          "percussion": [0.1, 0.1, 0.0, 1.0, 0.5],
+          "arpeggio": [0.9, 0.9, 0.5, 0.0, 0.1],
+          "pad": [0.4, 0.5, 0.8, 0.0, 0.3],
+          "counter_melody": [0.8, 0.9, 0.3, 0.0, 0.2],
+          "accent": [0.6, 0.6, 0.2, 0.7, 0.8],
+          "special_effect": [0.5, 0.5, 0.2, 0.8, 0.7]
+        },
+        "frequency_ranges": [
+          {"min": 100, "max": 4500, "optimal": 1000},
+          {"min": 80, "max": 4000, "optimal": 700},
+          {"min": 30, "max": 1800, "optimal": 130},
+          {"min": 60, "max": 16000, "optimal": 1200},
+          {"min": 60, "max": 7000, "optimal": 250}
+        ]
+      }
+    },
+
+    "common_scenarios": {
+      "simple_melody_bass": {
+        "name": "Simple Melody + Bass",
+        "description": "Basic two-channel arrangement with melody and bass",
+        "fixed_assignments": {
+          "0": 0,
+          "2": 2
+        },
+        "strategy": "authentic_nes"
+      },
+
+      "full_chiptune": {
+        "name": "Full 5-Channel Chiptune",
+        "description": "Complete chiptune arrangement using all NES channels",
+        "fixed_assignments": {
+          "9": 3
+        },
+        "strategy": "modern_chiptune"
+      },
+
+      "percussion_focus": {
+        "name": "Percussion-Heavy",
+        "description": "Rhythm-focused arrangement with prominent drums",
+        "fixed_assignments": {
+          "9": 3,
+          "3": 4
+        },
+        "strategy": "bass_heavy"
+      },
+
+      "harmonic_complex": {
+        "name": "Complex Harmonies",
+        "description": "Multi-voice harmonic arrangement",
+        "fixed_assignments": {},
+        "strategy": "melodic_focus"
+      }
+    },
+
+    "frequency_guidelines": {
+      "pulse_channels": {
+        "optimal_range_hz": [200, 2000],
+        "acceptable_range_hz": [80, 4000],
+        "notes": "Square waves with variable duty cycle, best for melodies and harmonies"
+      },
+      "triangle_channel": {
+        "optimal_range_hz": [80, 400],
+        "acceptable_range_hz": [27, 2000],
+        "notes": "Fixed volume triangle wave, excellent for bass lines"
+      },
+      "noise_channel": {
+        "optimal_range_hz": [100, 5000],
+        "acceptable_range_hz": [50, 20000],
+        "notes": "Pseudo-random noise, ideal for percussion and special effects"
+      },
+      "dmc_channel": {
+        "optimal_range_hz": [60, 1000],
+        "acceptable_range_hz": [50, 8000],
+        "notes": "Sample-based channel, good for bass enhancement and special sounds"
+      }
+    },
+
+    "assignment_tips": [
+      "MIDI channel 9 is typically drums - auto-assign to noise channel",
+      "Triangle channel has no volume control - avoid for dynamic parts",
+      "Pulse channels work best for mid-high frequency content",
+      "DMC channel is sample-based - good for accents and bass hits",
+      "Fast arpeggios work well on pulse channels",
+      "Sustained bass lines are perfect for triangle channel",
+      "Balance the load between pulse channels for optimal mix"
+    ]
+  }
+}

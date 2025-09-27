@@ -38,10 +38,45 @@ set(PROJECT_SOURCES
     src/main.cpp
     src/machine_stub.cpp
     src/music_parser.cpp
+    src/audio_device.cpp
+    src/register_mapping.cpp
+    src/mame_integration.cpp
+    src/mame_core/mame_minimal.cpp
+    src/mame_core/minimal_nesapu.cpp
+    src/nes_note_mapping.cpp
+    src/audio_stream.cpp
+    src/nes_audio_mixer.cpp
+    src/nes_sequencer.cpp
+    src/nes_playback_engine.cpp
+    src/comprehensive_file_support.cpp
+    src/nes_cli.cpp
+    src/nes_config.cpp
+    src/nes_realtime_control.cpp
+    src/nes_channel_assignment.cpp
+    src/nes_channel_assignment_cli.cpp
 )
 
 # Create main executable
 add_executable(mame_synth ${PROJECT_SOURCES})
+
+# Find and link audio libraries
+if(UNIX AND NOT APPLE)
+    # Linux - use ALSA
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(ALSA alsa)
+    if(ALSA_FOUND)
+        target_include_directories(mame_synth PRIVATE ${ALSA_INCLUDE_DIRS})
+        target_link_libraries(mame_synth ${ALSA_LIBRARIES})
+        target_compile_definitions(mame_synth PRIVATE HAVE_ALSA)
+        message(STATUS "Found ALSA: ${ALSA_LIBRARIES}")
+    else()
+        message(WARNING "ALSA not found - audio will use file output only")
+    endif()
+elseif(WIN32)
+    # Windows - use DirectSound
+    target_link_libraries(mame_synth dsound)
+    target_compile_definitions(mame_synth PRIVATE HAVE_DIRECTSOUND)
+endif()
 
 # Compiler-specific flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -50,3 +85,9 @@ endif()
 
 # Create build directories
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/src)
+
+# Add tests subdirectory
+add_subdirectory(tests)
+
+# Add tools subdirectory
+add_subdirectory(tools)
