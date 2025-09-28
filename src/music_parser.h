@@ -31,6 +31,24 @@ struct music_note {
     music_note(uint8_t ch = 0, uint8_t n = 60, uint8_t vel = 64,
                music_time_t st = 0, music_time_t dur = 480)
         : channel(ch), note(n), velocity(vel), start(st), duration(dur) {}
+
+    // Comparison operators for sorting
+    bool operator<(const music_note& other) const {
+        if (start != other.start) return start < other.start;
+        if (channel != other.channel) return channel < other.channel;
+        if (note != other.note) return note < other.note;
+        return velocity < other.velocity;
+    }
+
+    bool operator==(const music_note& other) const {
+        return channel == other.channel && note == other.note &&
+               velocity == other.velocity && start == other.start &&
+               duration == other.duration;
+    }
+
+    bool operator!=(const music_note& other) const {
+        return !(*this == other);
+    }
 };
 
 // Control change event
@@ -102,6 +120,12 @@ public:
     const std::vector<music_tempo>& tempos() const { return m_tempos; }
     const music_metadata& metadata() const { return m_metadata; }
     music_metadata& metadata() { return m_metadata; }
+
+    // Non-const getters for modification
+    std::vector<music_note>& notes() { return m_notes; }
+    std::vector<music_control>& controls() { return m_controls; }
+    std::vector<music_program>& programs() { return m_programs; }
+    std::vector<music_tempo>& tempos() { return m_tempos; }
 
     // Statistics
     size_t note_count() const { return m_notes.size(); }

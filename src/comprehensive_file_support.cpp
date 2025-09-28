@@ -527,6 +527,44 @@ bool enhanced_midi_parser::read_string_event(const uint8_t* data, size_t length,
     return true;
 }
 
+channel_analysis enhanced_midi_parser::analyze_channel_musical_role(const music_data& data, uint8_t channel) {
+    channel_analysis analysis;
+    analysis.channel_id = channel;
+
+    // Collect notes for this channel
+    for (const auto& note : data.notes()) {
+        if (note.channel == channel) {
+            analysis.notes.push_back(note);
+            analysis.note_count++;
+            analysis.min_note = std::min(analysis.min_note, note.note);
+            analysis.max_note = std::max(analysis.max_note, note.note);
+            analysis.total_duration += note.duration;
+        }
+    }
+
+    if (analysis.note_count > 0) {
+        // Calculate average velocity
+        uint32_t total_velocity = 0;
+        for (const auto& note : analysis.notes) {
+            total_velocity += note.velocity;
+        }
+        analysis.avg_velocity = total_velocity / analysis.note_count;
+
+        // Simple heuristics for role detection
+        if (channel == 9) { // MIDI channel 10 (0-indexed as 9) is typically percussion
+            analysis.is_percussion = true;
+        } else if (analysis.min_note <= 40 && analysis.max_note <= 60) {
+            analysis.is_bass = true;
+        } else if (analysis.max_note - analysis.min_note > 24) {
+            analysis.is_melody = true;
+        } else {
+            analysis.is_harmony = true;
+        }
+    }
+
+    return analysis;
+}
+
 // Enhanced MusicXML Parser Implementation
 enhanced_musicxml_parser::enhanced_musicxml_parser() = default;
 enhanced_musicxml_parser::~enhanced_musicxml_parser() = default;
@@ -673,9 +711,9 @@ bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music
 
         // Determine musical role
         analysis.is_bass = analysis.average_pitch < 50;       // Below D3
-        analysis.is_melodic = analysis.average_pitch >= 60;   // Above C4
+        analysis.is_melody = analysis.average_pitch >= 60;   // Above C4
         // Detect percussion patterns
-        analysis.is_percussive = detect_percussion_patterns(analysis);
+        analysis.is_percussion = detect_percussion_patterns(analysis);
 
         // Calculate rhythmic complexity (note density)
         if (max_time > min_time) {
@@ -714,7 +752,7 @@ bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music
     // Assign melodic parts to pulse channels
     uint8_t pulse_channel = 0;
     for (const auto& [channel, analysis] : channel_data) {
-        if (analysis.is_melodic && pulse_channel < 2) {
+        if (analysis.is_melody && pulse_channel < 2) {
             assignments.push_back({channel, pulse_channel,
                                  "Melodic part assigned to pulse channel " + std::to_string(pulse_channel)});
             nes_channels_used[pulse_channel] = true;
@@ -1208,7 +1246,7 @@ bool nes_pattern_parser::export_to_file(const music_data& data, const enhanced_m
         // Sort notes by start time
         std::sort(channel_notes.begin(), channel_notes.end(),
                   [](const music_note& a, const music_note& b) {
-                      return a.start_time < b.start_time;
+                      return a.start < b.start;
                   });
 
         // Export notes
@@ -1217,7 +1255,7 @@ bool nes_pattern_parser::export_to_file(const music_data& data, const enhanced_m
             if (i > 0) file << ",\n";
 
             file << "        {\n";
-            file << "          \"time\": " << note.start_time << ",\n";
+            file << "          \"time\": " << note.start << ",\n";
             file << "          \"note\": " << static_cast<int>(note.note) << ",\n";
             file << "          \"velocity\": " << static_cast<int>(note.velocity) << ",\n";
             file << "          \"duration\": " << note.duration << "\n";
@@ -1770,10 +1808,10 @@ void enhanced_midi_parser::write_channel_track(std::ofstream& file, const music_
     std::vector<std::pair<music_time_t, music_note>> channel_notes;
     for (const auto& note : data.notes()) {
         if (note.channel == channel) {
-            channel_notes.emplace_back(note.start_time, note);
+            channel_notes.emplace_back(note.start, note);
             // Add note off event
             music_note note_off = note;
-            channel_notes.emplace_back(note.start_time + note.duration, note_off);
+            channel_notes.emplace_back(note.start + note.duration, note_off);
         }
     }
 
@@ -1786,7 +1824,7 @@ void enhanced_midi_parser::write_channel_track(std::ofstream& file, const music_
         uint32_t delta_time = static_cast<uint32_t>(event_time - last_time);
         write_variable_length(file, delta_time);
 
-        bool is_note_off = (event_time == note.start_time + note.duration);
+        bool is_note_off = (event_time == note.start + note.duration);
         uint8_t status = is_note_off ? (0x80 | channel) : (0x90 | channel);
         uint8_t velocity = is_note_off ? 0 : note.velocity;
 
@@ -1827,8 +1865,8 @@ std::map<uint8_t, uint8_t> enhanced_midi_parser::create_intelligent_channel_mapp
 
         double priority = 0.0;
         if (analysis.is_bass) priority += 100.0;
-        if (analysis.is_melodic) priority += 50.0;
-        if (analysis.is_percussive) priority += 25.0;
+        if (analysis.is_melody) priority += 50.0;
+        if (analysis.is_percussion) priority += 25.0;
         priority += analysis.note_density * 10.0; // More active channels get higher priority
 
         channel_priorities.emplace_back(channel, priority);
@@ -1847,9 +1885,9 @@ std::map<uint8_t, uint8_t> enhanced_midi_parser::create_intelligent_channel_mapp
 
         if (analysis.is_bass && nes_channel <= 2) {
             mapping[original_channel] = 2; // Triangle channel for bass
-        } else if (analysis.is_percussive && nes_channel <= 3) {
+        } else if (analysis.is_percussion && nes_channel <= 3) {
             mapping[original_channel] = 3; // Noise channel for percussion
-        } else if (analysis.is_melodic && nes_channel <= 1) {
+        } else if (analysis.is_melody && nes_channel <= 1) {
             mapping[original_channel] = nes_channel < 2 ? nes_channel : 0; // Pulse channels for melody
         } else {
             // Assign remaining channels sequentially
@@ -1877,7 +1915,7 @@ void enhanced_midi_parser::remove_overlapping_notes_for_channel(music_data& data
     // Sort by start time
     std::sort(channel_notes.begin(), channel_notes.end(),
               [](const music_note& a, const music_note& b) {
-                  return a.start_time < b.start_time;
+                  return a.start < b.start;
               });
 
     // Remove overlapping notes (keep the first note, truncate or remove later ones)  
@@ -1885,10 +1923,10 @@ void enhanced_midi_parser::remove_overlapping_notes_for_channel(music_data& data
         music_note& current = channel_notes[i].get();
         music_note& next = channel_notes[i + 1].get();
 
-        music_time_t current_end = current.start_time + current.duration;
-        if (current_end > next.start_time) {
+        music_time_t current_end = current.start + current.duration;
+        if (current_end > next.start) {
             // Truncate current note to avoid overlap
-            current.duration = next.start_time - current.start_time;
+            current.duration = next.start - current.start;
 
             // If duration becomes too short, mark for removal
             if (current.duration < 10) { // Minimum 10 ticks
@@ -1955,7 +1993,7 @@ bool enhanced_musicxml_parser::detect_percussion_patterns(const channel_analysis
         // Look for repeating rhythmic patterns
         std::vector<music_time_t> intervals;
         for (size_t i = 1; i < analysis.notes.size() && i < 16; ++i) {
-            intervals.push_back(analysis.notes[i].start_time - analysis.notes[i-1].start_time);
+            intervals.push_back(analysis.notes[i].start - analysis.notes[i-1].start);
         }
         
         // Check for repeated intervals (simple pattern detection)
@@ -2029,7 +2067,7 @@ bool nes_pattern_parser::parse_nes_pattern_text(std::ifstream& file, music_data&
 
         if (iss >> time >> note >> velocity >> duration) {
             music_note new_note;
-            new_note.start_time = time;
+            new_note.start = time;
             new_note.note = static_cast<uint8_t>(note);
             new_note.velocity = static_cast<uint8_t>(velocity);
             new_note.duration = duration;
@@ -2122,7 +2160,7 @@ void nes_pattern_parser::parse_channel_from_json(const std::string& json_content
         };
 
         music_note new_note;
-        new_note.start_time = extract_value("time");
+        new_note.start = extract_value("time");
         new_note.note = static_cast<uint8_t>(extract_value("note"));
         new_note.velocity = static_cast<uint8_t>(extract_value("velocity"));
         new_note.duration = extract_value("duration");

@@ -22,6 +22,24 @@
  * - Detailed error reporting and recovery
  */
 
+// Channel analysis for musical role detection
+struct channel_analysis {
+    std::vector<music_note> notes;
+    uint8_t channel_id = 0;
+    uint32_t note_count = 0;
+    uint8_t min_note = 127;
+    uint8_t max_note = 0;
+    uint8_t avg_velocity = 64;
+    music_time_t total_duration = 0;
+    bool is_percussion = false;
+    bool is_bass = false;
+    bool is_melody = false;
+    bool is_harmony = false;
+    double rhythm_regularity = 0.0; // 0-1, higher = more regular rhythm
+    double note_density = 0.0; // Notes per time unit
+    double average_pitch = 60.0; // Average MIDI note number
+};
+
 // Enhanced metadata with comprehensive music information
 struct enhanced_music_metadata {
     // Basic metadata
@@ -39,6 +57,7 @@ struct enhanced_music_metadata {
     uint16_t track_count = 0;
     music_time_t total_ticks = 0;
     uint32_t default_tempo_bpm = 120;
+    uint32_t tempo_bpm = 120;  // For compatibility
     uint32_t key_signature = 0; // C major = 0
     uint32_t time_signature_numerator = 4;
     uint32_t time_signature_denominator = 4;
@@ -69,6 +88,8 @@ struct enhanced_music_metadata {
         uint8_t dmc_usage_percentage = 0;
         std::vector<std::string> compatibility_warnings;
         std::vector<std::string> optimization_suggestions;
+        bool optimized_for_nes = false;
+        std::vector<std::string> optimization_notes;
     } nes_analysis;
 
     // Duration calculations
@@ -164,6 +185,7 @@ private:
     void extract_midi_metadata(const std::vector<midi_track_info>& tracks,
                               const midi_header_info& header, enhanced_music_metadata& metadata);
     void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
+    channel_analysis analyze_channel_musical_role(const music_data& data, uint8_t channel);
 
     // MIDI utility functions
     uint32_t read_variable_length(const uint8_t*& data, size_t& remaining);
@@ -208,9 +230,10 @@ private:
         uint8_t suggested_nes_channel;
         double average_pitch;
         double rhythmic_complexity;
-        bool is_melodic;
+        bool is_melody;
         bool is_bass;
-        bool is_percussive;
+        bool is_percussion;
+        double note_density = 0.0; // For compatibility
     };
 
     bool validate_xml_structure(const std::string& filename, std::vector<std::string>& errors);

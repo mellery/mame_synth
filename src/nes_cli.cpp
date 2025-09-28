@@ -78,7 +78,52 @@ nes_cli::command_result nes_cli::run(int argc, char* argv[]) {
         }
     }
 
-    // Execute single command
+    // Check if first argument is a file path (contains . or / or ends with common audio extensions)
+    std::string first_arg = args[0];
+    bool is_file_path = false;
+
+    // Check if it looks like a file path
+    if (first_arg.find('.') != std::string::npos ||
+        first_arg.find('/') != std::string::npos ||
+        first_arg.find('\\') != std::string::npos) {
+        is_file_path = true;
+    }
+
+    // Check if it ends with common audio/music file extensions
+    std::vector<std::string> audio_extensions = {".mid", ".midi", ".wav", ".musicxml", ".xml"};
+    for (const auto& ext : audio_extensions) {
+        if (first_arg.length() >= ext.length() &&
+            first_arg.substr(first_arg.length() - ext.length()) == ext) {
+            is_file_path = true;
+            break;
+        }
+    }
+
+    // If it looks like a file path, load and play it
+    if (is_file_path) {
+        std::vector<std::string> load_args = {first_arg};
+        auto load_result = cmd_load(load_args);
+        if (!load_result.success) {
+            return load_result;
+        }
+
+        // If load was successful, start playback
+        std::vector<std::string> play_args;
+        auto play_result = cmd_play(play_args);
+        if (!play_result.success) {
+            return play_result;
+        }
+
+        // Keep the program running to allow audio playback
+        std::cout << "\nPlayback started. Press Enter to stop...\n";
+        std::cin.get();
+
+        // Stop playback when user presses Enter
+        std::vector<std::string> stop_args;
+        return cmd_stop(stop_args);
+    }
+
+    // Execute single command (original behavior)
     std::string command = args[0];
     args.erase(args.begin());
 
@@ -440,13 +485,15 @@ std::vector<std::string> nes_cli::parse_command_line(const std::string& cmd_line
 
 void nes_cli::print_usage() const {
     std::cout << "NES Synthesizer - Command Line Interface\n\n";
-    std::cout << "Usage: mame_synth [options] <command> [arguments]\n\n";
+    std::cout << "Usage: mame_synth [options] <file|command> [arguments]\n\n";
     std::cout << "Global Options:\n";
     std::cout << "  -h, --help        Show this help message\n";
     std::cout << "  -v, --version     Show version information\n";
     std::cout << "  -i, --interactive Enter interactive mode\n";
     std::cout << "  -q, --quiet       Suppress output messages\n";
     std::cout << "  --verbose         Show detailed output\n\n";
+    std::cout << "Direct File Playback:\n";
+    std::cout << "  <file.mid>        Load and play a music file directly\n\n";
     std::cout << "Common Commands:\n";
     std::cout << "  load <file>       Load and play a music file\n";
     std::cout << "  validate <file>   Validate a music file\n";
@@ -455,6 +502,8 @@ void nes_cli::print_usage() const {
     std::cout << "  stop              Stop playback\n";
     std::cout << "  help              Show all available commands\n\n";
     std::cout << "Examples:\n";
+    std::cout << "  mame_synth song.mid\n";
+    std::cout << "  mame_synth \"file with spaces.mid\"\n";
     std::cout << "  mame_synth load song.mid\n";
     std::cout << "  mame_synth validate *.mid\n";
     std::cout << "  mame_synth --interactive\n";
