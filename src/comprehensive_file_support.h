@@ -22,7 +22,7 @@
  * - Detailed error reporting and recovery
  */
 
-// Channel analysis for musical role detection
+// Unified channel analysis for musical role detection
 struct channel_analysis {
     std::vector<music_note> notes;
     uint8_t channel_id = 0;
@@ -31,13 +31,15 @@ struct channel_analysis {
     uint8_t max_note = 0;
     uint8_t avg_velocity = 64;
     music_time_t total_duration = 0;
+    double average_pitch = 60.0; // Average MIDI note number
+    double note_density = 0.0; // Notes per time unit
+    double rhythm_regularity = 0.0; // 0-1, higher = more regular rhythm
+    double rhythmic_complexity = 0.0; // Complex rhythm patterns
+    uint8_t suggested_nes_channel = 0; // Recommended NES channel assignment
     bool is_percussion = false;
     bool is_bass = false;
     bool is_melody = false;
     bool is_harmony = false;
-    double rhythm_regularity = 0.0; // 0-1, higher = more regular rhythm
-    double note_density = 0.0; // Notes per time unit
-    double average_pitch = 60.0; // Average MIDI note number
 };
 
 // Enhanced metadata with comprehensive music information
@@ -140,6 +142,12 @@ public:
     // NES-specific optimization
     virtual bool supports_nes_optimization() const { return false; }
     virtual bool optimize_for_nes(music_data& data, enhanced_music_metadata& metadata) { return false; }
+
+protected:
+    // Common analysis functions available to all parsers
+    virtual void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
+    virtual channel_analysis analyze_channel_musical_role(const music_data& data, uint8_t channel);
+    virtual bool detect_percussion_patterns(const channel_analysis& analysis);
 };
 
 // Enhanced MIDI parser with comprehensive metadata support
@@ -184,8 +192,6 @@ private:
                          midi_track_info& track_info, music_time_t& current_time);
     void extract_midi_metadata(const std::vector<midi_track_info>& tracks,
                               const midi_header_info& header, enhanced_music_metadata& metadata);
-    void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
-    channel_analysis analyze_channel_musical_role(const music_data& data, uint8_t channel);
 
     // MIDI utility functions
     uint32_t read_variable_length(const uint8_t*& data, size_t& remaining);
@@ -225,23 +231,10 @@ public:
     bool optimize_for_nes(music_data& data, enhanced_music_metadata& metadata) override;
 
 private:
-    struct channel_analysis {
-        std::vector<music_note> notes;
-        uint8_t suggested_nes_channel;
-        double average_pitch;
-        double rhythmic_complexity;
-        bool is_melody;
-        bool is_bass;
-        bool is_percussion;
-        double note_density = 0.0; // For compatibility
-    };
-
     bool validate_xml_structure(const std::string& filename, std::vector<std::string>& errors);
     void extract_musicxml_metadata(enhanced_music_metadata& metadata);
-    void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
     void update_nes_analysis_detailed(const music_data& data, enhanced_music_metadata& metadata);
     uint8_t map_pitch_to_noise_period(uint8_t pitch);
-    bool detect_percussion_patterns(const channel_analysis& analysis);
 
 };
 

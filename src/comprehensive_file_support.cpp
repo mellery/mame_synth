@@ -480,7 +480,7 @@ void enhanced_midi_parser::extract_midi_metadata(const std::vector<midi_track_in
     }
 }
 
-void enhanced_midi_parser::analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata) {
+void enhanced_music_parser::analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata) {
     auto& nes = metadata.nes_analysis;
 
     // Basic NES compatibility analysis
@@ -527,7 +527,7 @@ bool enhanced_midi_parser::read_string_event(const uint8_t* data, size_t length,
     return true;
 }
 
-channel_analysis enhanced_midi_parser::analyze_channel_musical_role(const music_data& data, uint8_t channel) {
+channel_analysis enhanced_music_parser::analyze_channel_musical_role(const music_data& data, uint8_t channel) {
     channel_analysis analysis;
     analysis.channel_id = channel;
 
@@ -543,22 +543,41 @@ channel_analysis enhanced_midi_parser::analyze_channel_musical_role(const music_
     }
 
     if (analysis.note_count > 0) {
-        // Calculate average velocity
+        // Calculate average velocity and pitch
         uint32_t total_velocity = 0;
+        uint32_t total_pitch = 0;
         for (const auto& note : analysis.notes) {
             total_velocity += note.velocity;
+            total_pitch += note.note;
         }
         analysis.avg_velocity = total_velocity / analysis.note_count;
+        analysis.average_pitch = static_cast<double>(total_pitch) / analysis.note_count;
 
-        // Simple heuristics for role detection
-        if (channel == 9) { // MIDI channel 10 (0-indexed as 9) is typically percussion
+        // Calculate note density (notes per time unit)
+        if (analysis.total_duration > 0) {
+            analysis.note_density = static_cast<double>(analysis.note_count) / analysis.total_duration * 1000.0;
+        }
+
+        // Calculate rhythmic complexity and regularity
+        analysis.rhythmic_complexity = analysis.note_density * 0.1; // Simple approximation
+        analysis.rhythm_regularity = 0.5; // Default value, could be enhanced with interval analysis
+
+        // Detect percussion patterns
+        analysis.is_percussion = detect_percussion_patterns(analysis);
+
+        // Musical role detection heuristics
+        if (channel == 9 || analysis.is_percussion) { // MIDI channel 10 (0-indexed as 9) is typically percussion
             analysis.is_percussion = true;
-        } else if (analysis.min_note <= 40 && analysis.max_note <= 60) {
+            analysis.suggested_nes_channel = 3; // Noise channel
+        } else if (analysis.average_pitch < 50) { // Below D3
             analysis.is_bass = true;
-        } else if (analysis.max_note - analysis.min_note > 24) {
+            analysis.suggested_nes_channel = 2; // Triangle channel
+        } else if (analysis.average_pitch >= 60) { // Above C4
             analysis.is_melody = true;
+            analysis.suggested_nes_channel = (analysis.note_count > 50) ? 0 : 1; // Pulse channels
         } else {
             analysis.is_harmony = true;
+            analysis.suggested_nes_channel = 1; // Pulse 2
         }
     }
 
@@ -693,35 +712,9 @@ bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music
 
     std::map<uint8_t, channel_analysis> channel_data;
 
-    // Analyze each original channel
-    for (const auto& note : data.notes()) {
-        channel_data[note.channel].notes.push_back(note);
-    }
-
-    // Calculate analysis metrics for each channel
-    for (auto& [channel, analysis] : channel_data) {
-        if (analysis.notes.empty()) continue;
-
-        // Calculate average pitch
-        double total_pitch = 0;
-        for (const auto& note : analysis.notes) {
-            total_pitch += note.note;
-        }
-        analysis.average_pitch = total_pitch / analysis.notes.size();
-
-        // Determine musical role
-        analysis.is_bass = analysis.average_pitch < 50;       // Below D3
-        analysis.is_melody = analysis.average_pitch >= 60;   // Above C4
-        // Detect percussion patterns
-        analysis.is_percussion = detect_percussion_patterns(analysis);
-
-        // Calculate rhythmic complexity (note density)
-        if (max_time > min_time) {
-            double time_span = static_cast<double>(max_time - min_time);
-            analysis.rhythmic_complexity = analysis.notes.size() / time_span;
-        } else {
-            analysis.rhythmic_complexity = 0;
-        }
+    // Analyze each original channel using the unified analysis function
+    for (uint8_t channel : channels_used) {
+        channel_data[channel] = analyze_channel_musical_role(data, channel);
     }
 
     // Step 3: Intelligent NES channel assignment
@@ -980,55 +973,6 @@ void enhanced_musicxml_parser::extract_musicxml_metadata(enhanced_music_metadata
 #endif
 }
 
-void enhanced_musicxml_parser::analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata) {
-    // Analyze how well the MusicXML data works with NES APU
-    std::map<uint8_t, int> channel_counts;
-    int min_note = 127, max_note = 0;
-
-    // Analyze notes across all channels
-    for (const auto& note : data.notes()) {
-        channel_counts[note.channel]++;
-        if (note.note < min_note) min_note = note.note;
-        if (note.note > max_note) max_note = note.note;
-    }
-
-    metadata.nes_analysis.is_nes_compatible = channel_counts.size() <= 5;
-
-    if (channel_counts.size() > 5) {
-        metadata.nes_analysis.compatibility_warnings.push_back("More than 5 channels used - some notes may conflict");
-    }
-
-    // Check for out-of-range notes
-    if (data.note_count() > 0 && (min_note < 21 || max_note > 108)) {
-        metadata.nes_analysis.compatibility_warnings.push_back(
-            "Notes outside typical NES range (A0-B7)"
-        );
-    }
-
-    // Set usage percentages based on channel activity
-    size_t channel_index = 0;
-    for (const auto& [channel, count] : channel_counts) {
-        if (channel_index >= 5) break;
-
-        int usage_percent = std::min(100, (count * 100) / static_cast<int>(metadata.total_notes + 1));
-
-        if (channel_index == 0) metadata.nes_analysis.pulse1_usage_percentage = usage_percent;
-        else if (channel_index == 1) metadata.nes_analysis.pulse2_usage_percentage = usage_percent;
-        else if (channel_index == 2) metadata.nes_analysis.triangle_usage_percentage = usage_percent;
-        else if (channel_index == 3) metadata.nes_analysis.noise_usage_percentage = usage_percent;
-        else if (channel_index == 4) metadata.nes_analysis.dmc_usage_percentage = usage_percent;
-
-        channel_index++;
-    }
-
-    // Add optimization suggestions
-    if (channel_counts.size() > 2) {
-        metadata.nes_analysis.optimization_suggestions.push_back("Consider using pulse channels for melody");
-    }
-    if (channel_counts.size() > 3) {
-        metadata.nes_analysis.optimization_suggestions.push_back("Use triangle channel for bass lines");
-    }
-}
 
 void enhanced_musicxml_parser::update_nes_analysis_detailed(const music_data& data, enhanced_music_metadata& metadata) {
     // Reset analysis
@@ -1944,7 +1888,7 @@ void enhanced_midi_parser::remove_overlapping_notes_for_channel(music_data& data
 }
 
 // Percussion pattern detection helper function
-bool enhanced_musicxml_parser::detect_percussion_patterns(const channel_analysis& analysis) {
+bool enhanced_music_parser::detect_percussion_patterns(const channel_analysis& analysis) {
     if (analysis.notes.empty()) return false;
 
     // Criteria for percussion detection:
