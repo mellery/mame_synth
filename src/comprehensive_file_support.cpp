@@ -205,13 +205,149 @@ bool enhanced_midi_parser::can_parse_file(const std::string& filename) {
 }
 
 bool enhanced_midi_parser::export_to_file(const music_data& data, const enhanced_music_metadata& metadata, const std::string& filename) {
-    // TODO: Implement MIDI export functionality
-    return false;
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    // Write MIDI header
+    file.write("MThd", 4);
+
+    // Header length (6 bytes)
+    uint32_t header_length = 6;
+    write_big_endian_32(file, header_length);
+
+    // Format type (1 = multiple tracks, synchronous)
+    uint16_t format_type = 1;
+    write_big_endian_16(file, format_type);
+
+    // Count tracks needed (one per channel used + tempo track)
+    std::set<uint8_t> channels_used;
+    for (const auto& note : data.notes()) {
+        channels_used.insert(note.channel);
+    }
+    uint16_t track_count = static_cast<uint16_t>(channels_used.size() + 1); // +1 for tempo track
+    write_big_endian_16(file, track_count);
+
+    // Ticks per quarter note
+    uint16_t ticks_per_quarter = 480;
+    write_big_endian_16(file, ticks_per_quarter);
+
+    // Write tempo track
+    write_tempo_track(file, data, metadata, ticks_per_quarter);
+
+    // Write track for each channel
+    for (uint8_t channel : channels_used) {
+        write_channel_track(file, data, channel, ticks_per_quarter);
+    }
+
+    file.close();
+    return file.good();
 }
 
 bool enhanced_midi_parser::optimize_for_nes(music_data& data, enhanced_music_metadata& metadata) {
-    // TODO: Implement NES optimization (channel limiting, note range adjustment, etc.)
-    return false;
+    bool optimizations_applied = false;
+
+    // Step 1: Limit to 5 NES channels (0-4: Pulse1, Pulse2, Triangle, Noise, DMC)
+    std::set<uint8_t> used_channels;
+    for (const auto& note : data.notes()) {
+        used_channels.insert(note.channel);
+    }
+
+    if (used_channels.size() > 5) {
+        // Map channels using intelligent assignment
+        std::map<uint8_t, uint8_t> channel_mapping = create_intelligent_channel_mapping(data);
+
+        // Apply channel mapping
+        for (auto& note : data.notes()) {
+            if (channel_mapping.find(note.channel) != channel_mapping.end()) {
+                note.channel = channel_mapping[note.channel];
+                optimizations_applied = true;
+            }
+        }
+
+        // Update controls and programs too
+        for (auto& control : data.controls()) {
+            if (channel_mapping.find(control.channel) != channel_mapping.end()) {
+                control.channel = channel_mapping[control.channel];
+            }
+        }
+        for (auto& program : data.programs()) {
+            if (channel_mapping.find(program.channel) != channel_mapping.end()) {
+                program.channel = channel_mapping[program.channel];
+            }
+        }
+    }
+
+    // Step 2: Adjust note ranges for NES channels
+    for (auto& note : data.notes()) {
+        uint8_t original_note = note.note;
+
+        switch (note.channel) {
+            case 0: case 1: // Pulse channels: C1-B7 (24-95)
+                if (note.note < 24) {
+                    note.note = 24 + (note.note % 12); // Transpose up by octaves
+                    optimizations_applied = true;
+                } else if (note.note > 95) {
+                    note.note = 95 - ((127 - note.note) % 12); // Transpose down by octaves
+                    optimizations_applied = true;
+                }
+                break;
+
+            case 2: // Triangle channel: A0-B6 (21-83)
+                if (note.note < 21) {
+                    note.note = 21 + (note.note % 12);
+                    optimizations_applied = true;
+                } else if (note.note > 83) {
+                    note.note = 83 - ((127 - note.note) % 12);
+                    optimizations_applied = true;
+                }
+                break;
+
+            case 3: // Noise channel: map to percussion-like notes
+                // Map to standard drum kit range (35-81)
+                if (note.note < 35 || note.note > 81) {
+                    note.note = 35 + (note.note % 47); // Wrap within drum range
+                    optimizations_applied = true;
+                }
+                break;
+
+            case 4: // DMC channel: limited sample range
+                // Keep existing note but mark for sample mapping
+                break;
+        }
+    }
+
+    // Step 3: Optimize polyphony - NES can only play one note per channel
+    for (uint8_t channel = 0; channel < 5; ++channel) {
+        remove_overlapping_notes_for_channel(data, channel);
+        optimizations_applied = true;
+    }
+
+    // Step 4: Adjust velocities for NES volume levels
+    for (auto& note : data.notes()) {
+        uint8_t original_velocity = note.velocity;
+
+        // NES has 16 volume levels (0-15), map MIDI velocity (0-127) to these
+        uint8_t nes_volume = (note.velocity * 15) / 127;
+        note.velocity = (nes_volume * 127) / 15; // Convert back to MIDI range
+
+        if (note.velocity != original_velocity) {
+            optimizations_applied = true;
+        }
+    }
+
+    // Update metadata with optimization info
+    if (optimizations_applied) {
+        metadata.nes_analysis.optimized_for_nes = true;
+        metadata.nes_analysis.optimization_notes.push_back("Applied automatic NES optimization");
+        metadata.nes_analysis.optimization_notes.push_back("Limited to 5 channels with intelligent assignment");
+        metadata.nes_analysis.optimization_notes.push_back("Adjusted note ranges for NES hardware limits");
+        metadata.nes_analysis.optimization_notes.push_back("Removed overlapping notes (monophonic channels)");
+        metadata.nes_analysis.optimization_notes.push_back("Quantized velocities to NES volume levels");
+    }
+
+    return optimizations_applied;
 }
 
 bool enhanced_midi_parser::parse_midi_header(const std::vector<uint8_t>& data, midi_header_info& header) {
@@ -516,15 +652,6 @@ bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music
     auto channels_used = file_support_utils::get_channels_used(data);
 
     // Step 2: Advanced channel assignment algorithm
-    struct channel_analysis {
-        std::vector<music_note> notes;
-        uint8_t suggested_nes_channel;
-        double average_pitch;
-        double rhythmic_complexity;
-        bool is_melodic;
-        bool is_bass;
-        bool is_percussive;
-    };
 
     std::map<uint8_t, channel_analysis> channel_data;
 
@@ -547,7 +674,8 @@ bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music
         // Determine musical role
         analysis.is_bass = analysis.average_pitch < 50;       // Below D3
         analysis.is_melodic = analysis.average_pitch >= 60;   // Above C4
-        analysis.is_percussive = false; // TODO: Detect percussion patterns
+        // Detect percussion patterns
+        analysis.is_percussive = detect_percussion_patterns(analysis);
 
         // Calculate rhythmic complexity (note density)
         if (max_time > min_time) {
@@ -954,11 +1082,31 @@ nes_pattern_parser::nes_pattern_parser() = default;
 nes_pattern_parser::~nes_pattern_parser() = default;
 
 bool nes_pattern_parser::parse_file_enhanced(const std::string& filename, music_data& output, enhanced_music_metadata& metadata) {
-    // TODO: Implement NES pattern parsing
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    // Set basic metadata
     metadata.filename = filename;
     metadata.file_format = "NES Pattern";
     metadata.file_size_bytes = file_support_utils::get_file_size(filename);
-    return false;
+    metadata.modification_time = file_support_utils::get_file_modification_time(filename);
+
+    try {
+        // Parse JSON-based NES pattern format
+        std::string json_content((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+
+        // Simple JSON parsing for NES pattern format
+        return parse_nes_pattern_json(json_content, output, metadata);
+
+    } catch (const std::exception& e) {
+        // Fallback: Try to parse as simple text format
+        file.clear();
+        file.seekg(0);
+        return parse_nes_pattern_text(file, output, metadata);
+    }
 }
 
 file_validation_result nes_pattern_parser::validate_file(const std::string& filename) {
@@ -970,7 +1118,46 @@ file_validation_result nes_pattern_parser::validate_file(const std::string& file
         return result;
     }
 
-    // TODO: Validate NES pattern file format
+    // Validate file extension
+    std::string ext = file_support_utils::to_lower(file_support_utils::get_file_extension(filename));
+    if (ext != ".nesp" && ext != ".nespattern") {
+        result.errors.push_back("Invalid file extension for NES pattern");
+        result.is_valid = false;
+        return result;
+    }
+
+    // Try to open and validate file content
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        result.errors.push_back("Cannot open file");
+        result.is_valid = false;
+        return result;
+    }
+
+    // Check if it's valid JSON or text format
+    std::string content((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+
+    if (content.empty()) {
+        result.errors.push_back("File is empty");
+        result.is_valid = false;
+        return result;
+    }
+
+    // Validate JSON format
+    if (content[0] == '{') {
+        if (!validate_nes_pattern_json_structure(content, result.errors)) {
+            result.is_valid = false;
+            return result;
+        }
+    } else {
+        // Validate text format
+        if (!validate_nes_pattern_text_structure(content, result.errors)) {
+            result.is_valid = false;
+            return result;
+        }
+    }
+
     result.is_valid = true;
     return result;
 }
@@ -981,8 +1168,71 @@ bool nes_pattern_parser::can_parse_file(const std::string& filename) {
 }
 
 bool nes_pattern_parser::export_to_file(const music_data& data, const enhanced_music_metadata& metadata, const std::string& filename) {
-    // TODO: Implement NES pattern export
-    return false;
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    // Export as JSON format
+    file << "{\n";
+    file << "  \"format\": \"NES_Pattern\",\n";
+    file << "  \"version\": \"1.0\",\n";
+    file << "  \"metadata\": {\n";
+    file << "    \"title\": \"" << escape_json_string(metadata.title) << "\",\n";
+    file << "    \"composer\": \"" << escape_json_string(metadata.composer) << "\",\n";
+    file << "    \"tempo_bpm\": " << (metadata.tempo_bpm > 0 ? metadata.tempo_bpm : 120) << ",\n";
+    file << "    \"ticks_per_quarter\": " << metadata.ticks_per_quarter << "\n";
+    file << "  },\n";
+    file << "  \"channels\": {\n";
+
+    // Export each NES channel (0-4)
+    bool first_channel = true;
+    for (uint8_t channel = 0; channel < 5; ++channel) {
+        std::vector<music_note> channel_notes;
+        for (const auto& note : data.notes()) {
+            if (note.channel == channel) {
+                channel_notes.push_back(note);
+            }
+        }
+
+        if (channel_notes.empty()) continue;
+
+        if (!first_channel) file << ",\n";
+        first_channel = false;
+
+        const char* channel_names[] = {"pulse1", "pulse2", "triangle", "noise", "dmc"};
+        file << "    \"" << channel_names[channel] << "\": {\n";
+        file << "      \"type\": \"" << channel_names[channel] << "\",\n";
+        file << "      \"notes\": [\n";
+
+        // Sort notes by start time
+        std::sort(channel_notes.begin(), channel_notes.end(),
+                  [](const music_note& a, const music_note& b) {
+                      return a.start_time < b.start_time;
+                  });
+
+        // Export notes
+        for (size_t i = 0; i < channel_notes.size(); ++i) {
+            const auto& note = channel_notes[i];
+            if (i > 0) file << ",\n";
+
+            file << "        {\n";
+            file << "          \"time\": " << note.start_time << ",\n";
+            file << "          \"note\": " << static_cast<int>(note.note) << ",\n";
+            file << "          \"velocity\": " << static_cast<int>(note.velocity) << ",\n";
+            file << "          \"duration\": " << note.duration << "\n";
+            file << "        }";
+        }
+
+        file << "\n      ]\n";
+        file << "    }";
+    }
+
+    file << "\n  }\n";
+    file << "}\n";
+
+    file.close();
+    return file.good();
 }
 
 // Comprehensive File Manager Implementation
@@ -1425,4 +1675,542 @@ std::unique_ptr<enhanced_musicxml_parser> comprehensive_file_support_factory::cr
 
 std::unique_ptr<nes_pattern_parser> comprehensive_file_support_factory::create_pattern_parser() {
     return std::make_unique<nes_pattern_parser>();
+}
+
+// MIDI export helper functions
+void enhanced_midi_parser::write_big_endian_16(std::ofstream& file, uint16_t value) {
+    file.put(static_cast<char>((value >> 8) & 0xFF));
+    file.put(static_cast<char>(value & 0xFF));
+}
+
+void enhanced_midi_parser::write_big_endian_32(std::ofstream& file, uint32_t value) {
+    file.put(static_cast<char>((value >> 24) & 0xFF));
+    file.put(static_cast<char>((value >> 16) & 0xFF));
+    file.put(static_cast<char>((value >> 8) & 0xFF));
+    file.put(static_cast<char>(value & 0xFF));
+}
+
+void enhanced_midi_parser::write_variable_length(std::ofstream& file, uint32_t value) {
+    uint32_t buffer = value & 0x7F;
+    while ((value >>= 7)) {
+        buffer <<= 8;
+        buffer |= ((value & 0x7F) | 0x80);
+    }
+    while (true) {
+        file.put(static_cast<char>(buffer & 0xFF));
+        if (buffer & 0x80) {
+            buffer >>= 8;
+        } else {
+            break;
+        }
+    }
+}
+
+void enhanced_midi_parser::write_tempo_track(std::ofstream& file, const music_data& data,
+                                           const enhanced_music_metadata& metadata, uint16_t ticks_per_quarter) {
+    // Start track chunk
+    file.write("MTrk", 4);
+
+    // We'll write the track length later
+    std::streampos length_pos = file.tellp();
+    write_big_endian_32(file, 0); // Placeholder for track length
+    std::streampos track_start = file.tellp();
+
+    // Track name
+    write_variable_length(file, 0); // Delta time 0
+    file.put(0xFF); // Meta event
+    file.put(0x03); // Track name
+    std::string track_name = "Tempo Track";
+    write_variable_length(file, track_name.length());
+    file.write(track_name.c_str(), track_name.length());
+
+    // Set tempo (120 BPM default)
+    write_variable_length(file, 0); // Delta time 0
+    file.put(0xFF); // Meta event
+    file.put(0x51); // Set tempo
+    file.put(0x03); // Length: 3 bytes
+    uint32_t microseconds_per_quarter = 500000; // 120 BPM
+    file.put(static_cast<char>((microseconds_per_quarter >> 16) & 0xFF));
+    file.put(static_cast<char>((microseconds_per_quarter >> 8) & 0xFF));
+    file.put(static_cast<char>(microseconds_per_quarter & 0xFF));
+
+    // End of track
+    write_variable_length(file, 0); // Delta time 0
+    file.put(0xFF); // Meta event
+    file.put(0x2F); // End of track
+    file.put(0x00); // Length: 0
+
+    // Write actual track length
+    std::streampos track_end = file.tellp();
+    uint32_t track_length = static_cast<uint32_t>(track_end - track_start);
+    file.seekp(length_pos);
+    write_big_endian_32(file, track_length);
+    file.seekp(track_end);
+}
+
+void enhanced_midi_parser::write_channel_track(std::ofstream& file, const music_data& data,
+                                              uint8_t channel, uint16_t ticks_per_quarter) {
+    // Start track chunk
+    file.write("MTrk", 4);
+
+    // We'll write the track length later
+    std::streampos length_pos = file.tellp();
+    write_big_endian_32(file, 0); // Placeholder for track length
+    std::streampos track_start = file.tellp();
+
+    // Track name
+    write_variable_length(file, 0); // Delta time 0
+    file.put(0xFF); // Meta event
+    file.put(0x03); // Track name
+    std::string track_name = "Channel " + std::to_string(channel + 1);
+    write_variable_length(file, track_name.length());
+    file.write(track_name.c_str(), track_name.length());
+
+    // Collect and sort notes for this channel
+    std::vector<std::pair<music_time_t, music_note>> channel_notes;
+    for (const auto& note : data.notes()) {
+        if (note.channel == channel) {
+            channel_notes.emplace_back(note.start_time, note);
+            // Add note off event
+            music_note note_off = note;
+            channel_notes.emplace_back(note.start_time + note.duration, note_off);
+        }
+    }
+
+    // Sort by time
+    std::sort(channel_notes.begin(), channel_notes.end());
+
+    // Write MIDI events
+    music_time_t last_time = 0;
+    for (const auto& [event_time, note] : channel_notes) {
+        uint32_t delta_time = static_cast<uint32_t>(event_time - last_time);
+        write_variable_length(file, delta_time);
+
+        bool is_note_off = (event_time == note.start_time + note.duration);
+        uint8_t status = is_note_off ? (0x80 | channel) : (0x90 | channel);
+        uint8_t velocity = is_note_off ? 0 : note.velocity;
+
+        file.put(status);
+        file.put(note.note);
+        file.put(velocity);
+
+        last_time = event_time;
+    }
+
+    // End of track
+    write_variable_length(file, 0); // Delta time 0
+    file.put(0xFF); // Meta event
+    file.put(0x2F); // End of track
+    file.put(0x00); // Length: 0
+
+    // Write actual track length
+    std::streampos track_end = file.tellp();
+    uint32_t track_length = static_cast<uint32_t>(track_end - track_start);
+    file.seekp(length_pos);
+    write_big_endian_32(file, track_length);
+    file.seekp(track_end);
+}
+// NES optimization helper functions  
+std::map<uint8_t, uint8_t> enhanced_midi_parser::create_intelligent_channel_mapping(const music_data& data) {
+    std::map<uint8_t, uint8_t> mapping;
+
+    // Analyze each channel to determine its musical role
+    std::map<uint8_t, channel_analysis> channel_roles;
+    for (uint8_t channel = 0; channel < 16; ++channel) {
+        channel_roles[channel] = analyze_channel_musical_role(data, channel);
+    }
+
+    // Sort channels by priority (bass -> melody -> harmony -> percussion)
+    std::vector<std::pair<uint8_t, double>> channel_priorities;
+    for (const auto& [channel, analysis] : channel_roles) {
+        if (analysis.notes.empty()) continue;
+
+        double priority = 0.0;
+        if (analysis.is_bass) priority += 100.0;
+        if (analysis.is_melodic) priority += 50.0;
+        if (analysis.is_percussive) priority += 25.0;
+        priority += analysis.note_density * 10.0; // More active channels get higher priority
+
+        channel_priorities.emplace_back(channel, priority);
+    }
+
+    // Sort by priority (highest first)
+    std::sort(channel_priorities.begin(), channel_priorities.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Assign to NES channels based on musical role
+    uint8_t nes_channel = 0;
+    for (const auto& [original_channel, priority] : channel_priorities) {
+        if (nes_channel >= 5) break; // Only 5 NES channels available
+
+        const auto& analysis = channel_roles[original_channel];
+
+        if (analysis.is_bass && nes_channel <= 2) {
+            mapping[original_channel] = 2; // Triangle channel for bass
+        } else if (analysis.is_percussive && nes_channel <= 3) {
+            mapping[original_channel] = 3; // Noise channel for percussion
+        } else if (analysis.is_melodic && nes_channel <= 1) {
+            mapping[original_channel] = nes_channel < 2 ? nes_channel : 0; // Pulse channels for melody
+        } else {
+            // Assign remaining channels sequentially
+            if (nes_channel < 5) {
+                mapping[original_channel] = nes_channel;
+            }
+        }
+        nes_channel++;
+    }
+
+    return mapping;
+}
+
+void enhanced_midi_parser::remove_overlapping_notes_for_channel(music_data& data, uint8_t channel) {
+    // Get all notes for this channel and sort by start time
+    std::vector<std::reference_wrapper<music_note>> channel_notes;
+    for (auto& note : data.notes()) {
+        if (note.channel == channel) {
+            channel_notes.push_back(std::ref(note));
+        }
+    }
+
+    if (channel_notes.size() <= 1) return; // No overlaps possible
+
+    // Sort by start time
+    std::sort(channel_notes.begin(), channel_notes.end(),
+              [](const music_note& a, const music_note& b) {
+                  return a.start_time < b.start_time;
+              });
+
+    // Remove overlapping notes (keep the first note, truncate or remove later ones)  
+    for (size_t i = 0; i < channel_notes.size() - 1; ++i) {
+        music_note& current = channel_notes[i].get();
+        music_note& next = channel_notes[i + 1].get();
+
+        music_time_t current_end = current.start_time + current.duration;
+        if (current_end > next.start_time) {
+            // Truncate current note to avoid overlap
+            current.duration = next.start_time - current.start_time;
+
+            // If duration becomes too short, mark for removal
+            if (current.duration < 10) { // Minimum 10 ticks
+                current.duration = 0; // Mark for removal
+            }
+        }
+    }
+
+    // Remove notes marked for removal (duration = 0)
+    auto& notes = const_cast<std::vector<music_note>&>(data.notes());
+    notes.erase(std::remove_if(notes.begin(), notes.end(),
+                               [channel](const music_note& note) {
+                                   return note.channel == channel && note.duration == 0;
+                               }), notes.end());
+}
+
+// Percussion pattern detection helper function
+bool enhanced_musicxml_parser::detect_percussion_patterns(const channel_analysis& analysis) {
+    if (analysis.notes.empty()) return false;
+
+    // Criteria for percussion detection:
+    // 1. High rhythmic density (lots of short notes)
+    // 2. Limited pitch variation (drums typically use specific notes)
+    // 3. Short note durations (percussion is typically percussive)
+    // 4. Notes in drum kit range (MIDI channel 10 or notes 35-81)
+
+    // Check rhythmic density
+    bool high_density = analysis.rhythmic_complexity > 0.5; // More than 0.5 notes per tick
+
+    // Check pitch variation
+    std::set<uint8_t> unique_pitches;
+    music_time_t total_duration = 0;
+    music_time_t short_note_count = 0;
+    
+    for (const auto& note : analysis.notes) {
+        unique_pitches.insert(note.note);
+        total_duration += note.duration;
+        
+        // Count notes shorter than quarter note (480 ticks at standard resolution)
+        if (note.duration < 240) { // Eighth note or shorter
+            short_note_count++;
+        }
+    }
+
+    // Limited pitch variation suggests percussion
+    bool limited_pitches = unique_pitches.size() <= 8; // Max 8 different percussion sounds
+
+    // High percentage of short notes
+    double short_note_ratio = static_cast<double>(short_note_count) / analysis.notes.size();
+    bool mostly_short_notes = short_note_ratio > 0.6; // 60% or more short notes
+
+    // Check if notes are in typical drum range (35-81 in MIDI)
+    bool in_drum_range = true;
+    for (uint8_t pitch : unique_pitches) {
+        if (pitch < 35 || pitch > 81) {
+            in_drum_range = false;
+            break;
+        }
+    }
+
+    // Check for repetitive patterns (common in percussion)
+    bool has_patterns = false;
+    if (analysis.notes.size() >= 4) {
+        // Look for repeating rhythmic patterns
+        std::vector<music_time_t> intervals;
+        for (size_t i = 1; i < analysis.notes.size() && i < 16; ++i) {
+            intervals.push_back(analysis.notes[i].start_time - analysis.notes[i-1].start_time);
+        }
+        
+        // Check for repeated intervals (simple pattern detection)
+        std::map<music_time_t, int> interval_counts;
+        for (auto interval : intervals) {
+            interval_counts[interval]++;
+        }
+        
+        // If any interval appears more than twice, consider it a pattern
+        for (const auto& [interval, count] : interval_counts) {
+            if (count >= 3) {
+                has_patterns = true;
+                break;
+            }
+        }
+    }
+
+    // Combine criteria: need at least 2 of these conditions
+    int percussion_score = 0;
+    if (high_density) percussion_score++;
+    if (limited_pitches) percussion_score++;
+    if (mostly_short_notes) percussion_score++;
+    if (in_drum_range) percussion_score++;
+    if (has_patterns) percussion_score++;
+
+    return percussion_score >= 2;
+}
+// NES pattern parsing helper functions
+bool nes_pattern_parser::parse_nes_pattern_json(const std::string& json_content, music_data& output, enhanced_music_metadata& metadata) {
+    // Simple JSON parsing - find key sections
+    size_t channels_pos = json_content.find("\"channels\"");
+    if (channels_pos == std::string::npos) {
+        return false;
+    }
+
+    // Extract metadata
+    extract_metadata_from_json(json_content, metadata);
+
+    // Parse each channel
+    const char* channel_names[] = {"pulse1", "pulse2", "triangle", "noise", "dmc"};
+    for (uint8_t channel = 0; channel < 5; ++channel) {
+        parse_channel_from_json(json_content, channel_names[channel], channel, output);
+    }
+
+    return true;
+}
+
+bool nes_pattern_parser::parse_nes_pattern_text(std::ifstream& file, music_data& output, enhanced_music_metadata& metadata) {
+    std::string line;
+    uint8_t current_channel = 0;
+
+    metadata.title = "Text Pattern";
+    metadata.composer = "Unknown";
+    metadata.tempo_bpm = 120;
+
+    while (std::getline(file, line)) {
+        // Skip empty lines and comments
+        if (line.empty() || line[0] == '#') continue;
+
+        // Channel declaration: CHANNEL 0, CHANNEL 1, etc.
+        if (line.substr(0, 7) == "CHANNEL") {
+            current_channel = static_cast<uint8_t>(std::stoi(line.substr(8)));
+            continue;
+        }
+
+        // Parse note line: TIME NOTE VELOCITY DURATION
+        std::istringstream iss(line);
+        music_time_t time;
+        int note, velocity;
+        music_time_t duration;
+
+        if (iss >> time >> note >> velocity >> duration) {
+            music_note new_note;
+            new_note.start_time = time;
+            new_note.note = static_cast<uint8_t>(note);
+            new_note.velocity = static_cast<uint8_t>(velocity);
+            new_note.duration = duration;
+            new_note.channel = current_channel;
+
+            output.add_note(new_note);
+        }
+    }
+
+    return true;
+}
+
+void nes_pattern_parser::extract_metadata_from_json(const std::string& json_content, enhanced_music_metadata& metadata) {
+    // Simple JSON value extraction
+    auto extract_string = [&](const std::string& key) -> std::string {
+        std::string search = "\"" + key + "\": \"";
+        size_t pos = json_content.find(search);
+        if (pos != std::string::npos) {
+            size_t start = pos + search.length();
+            size_t end = json_content.find("\"", start);
+            if (end != std::string::npos) {
+                return json_content.substr(start, end - start);
+            }
+        }
+        return "";
+    };
+
+    auto extract_number = [&](const std::string& key) -> int {
+        std::string search = "\"" + key + "\": ";
+        size_t pos = json_content.find(search);
+        if (pos != std::string::npos) {
+            size_t start = pos + search.length();
+            size_t end = json_content.find_first_of(",}", start);
+            if (end != std::string::npos) {
+                return std::stoi(json_content.substr(start, end - start));
+            }
+        }
+        return 0;
+    };
+
+    metadata.title = extract_string("title");
+    metadata.composer = extract_string("composer");
+    metadata.tempo_bpm = extract_number("tempo_bpm");
+    metadata.ticks_per_quarter = extract_number("ticks_per_quarter");
+
+    if (metadata.tempo_bpm == 0) metadata.tempo_bpm = 120;
+    if (metadata.ticks_per_quarter == 0) metadata.ticks_per_quarter = 480;
+}
+
+void nes_pattern_parser::parse_channel_from_json(const std::string& json_content, const std::string& channel_name, uint8_t channel_id, music_data& output) {
+    // Find channel section
+    std::string search = "\"" + channel_name + "\"";
+    size_t channel_pos = json_content.find(search);
+    if (channel_pos == std::string::npos) return;
+
+    // Find notes array
+    size_t notes_pos = json_content.find("\"notes\"", channel_pos);
+    if (notes_pos == std::string::npos) return;
+
+    size_t array_start = json_content.find("[", notes_pos);
+    size_t array_end = json_content.find("]", array_start);
+    if (array_start == std::string::npos || array_end == std::string::npos) return;
+
+    // Parse notes within the array
+    std::string notes_section = json_content.substr(array_start + 1, array_end - array_start - 1);
+
+    // Simple note parsing - look for note objects
+    size_t pos = 0;
+    while (pos < notes_section.length()) {
+        size_t note_start = notes_section.find("{", pos);
+        if (note_start == std::string::npos) break;
+
+        size_t note_end = notes_section.find("}", note_start);
+        if (note_end == std::string::npos) break;
+
+        std::string note_json = notes_section.substr(note_start, note_end - note_start + 1);
+
+        // Extract note values
+        auto extract_value = [&](const std::string& key) -> int {
+            std::string search_str = "\"" + key + "\": ";
+            size_t key_pos = note_json.find(search_str);
+            if (key_pos != std::string::npos) {
+                size_t val_start = key_pos + search_str.length();
+                size_t val_end = note_json.find_first_of(",}", val_start);
+                if (val_end != std::string::npos) {
+                    return std::stoi(note_json.substr(val_start, val_end - val_start));
+                }
+            }
+            return 0;
+        };
+
+        music_note new_note;
+        new_note.start_time = extract_value("time");
+        new_note.note = static_cast<uint8_t>(extract_value("note"));
+        new_note.velocity = static_cast<uint8_t>(extract_value("velocity"));
+        new_note.duration = extract_value("duration");
+        new_note.channel = channel_id;
+
+        if (new_note.note > 0 && new_note.velocity > 0 && new_note.duration > 0) {
+            output.add_note(new_note);
+        }
+
+        pos = note_end + 1;
+    }
+}
+
+bool nes_pattern_parser::validate_nes_pattern_json_structure(const std::string& content, std::vector<std::string>& errors) {
+    // Basic JSON structure validation
+    if (content.empty()) {
+        errors.push_back("Empty JSON content");
+        return false;
+    }
+
+    if (content[0] != '{' || content.back() != '}') {
+        errors.push_back("Invalid JSON structure - must be an object");
+        return false;
+    }
+
+    // Check for required fields
+    if (content.find("\"format\"") == std::string::npos) {
+        errors.push_back("Missing required field: format");
+        return false;
+    }
+
+    if (content.find("\"channels\"") == std::string::npos) {
+        errors.push_back("Missing required field: channels");
+        return false;
+    }
+
+    return true;
+}
+
+bool nes_pattern_parser::validate_nes_pattern_text_structure(const std::string& content, std::vector<std::string>& errors) {
+    std::istringstream iss(content);
+    std::string line;
+    bool has_channel = false;
+    bool has_notes = false;
+
+    while (std::getline(iss, line)) {
+        if (line.empty() || line[0] == '#') continue;
+
+        if (line.substr(0, 7) == "CHANNEL") {
+            has_channel = true;
+            continue;
+        }
+
+        // Try to parse as note line
+        std::istringstream line_iss(line);
+        music_time_t time;
+        int note, velocity;
+        music_time_t duration;
+
+        if (line_iss >> time >> note >> velocity >> duration) {
+            has_notes = true;
+        }
+    }
+
+    if (!has_channel) {
+        errors.push_back("No channel declarations found");
+        return false;
+    }
+
+    if (!has_notes) {
+        errors.push_back("No valid note entries found");
+        return false;
+    }
+
+    return true;
+}
+
+std::string nes_pattern_parser::escape_json_string(const std::string& str) {
+    std::string escaped;
+    for (char c : str) {
+        switch (c) {
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
 }

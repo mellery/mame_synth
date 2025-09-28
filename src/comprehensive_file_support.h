@@ -168,6 +168,19 @@ private:
     // MIDI utility functions
     uint32_t read_variable_length(const uint8_t*& data, size_t& remaining);
     bool read_string_event(const uint8_t* data, size_t length, std::string& result);
+
+    // MIDI export helper functions
+    void write_big_endian_16(std::ofstream& file, uint16_t value);
+    void write_big_endian_32(std::ofstream& file, uint32_t value);
+    void write_variable_length(std::ofstream& file, uint32_t value);
+    void write_tempo_track(std::ofstream& file, const music_data& data,
+                          const enhanced_music_metadata& metadata, uint16_t ticks_per_quarter);
+    void write_channel_track(std::ofstream& file, const music_data& data,
+                            uint8_t channel, uint16_t ticks_per_quarter);
+
+    // NES optimization helper functions
+    std::map<uint8_t, uint8_t> create_intelligent_channel_mapping(const music_data& data);
+    void remove_overlapping_notes_for_channel(music_data& data, uint8_t channel);
 };
 
 // Enhanced MusicXML parser
@@ -190,11 +203,22 @@ public:
     bool optimize_for_nes(music_data& data, enhanced_music_metadata& metadata) override;
 
 private:
+    struct channel_analysis {
+        std::vector<music_note> notes;
+        uint8_t suggested_nes_channel;
+        double average_pitch;
+        double rhythmic_complexity;
+        bool is_melodic;
+        bool is_bass;
+        bool is_percussive;
+    };
+
     bool validate_xml_structure(const std::string& filename, std::vector<std::string>& errors);
     void extract_musicxml_metadata(enhanced_music_metadata& metadata);
     void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
     void update_nes_analysis_detailed(const music_data& data, enhanced_music_metadata& metadata);
     uint8_t map_pitch_to_noise_period(uint8_t pitch);
+    bool detect_percussion_patterns(const channel_analysis& analysis);
 
 };
 
@@ -229,6 +253,15 @@ private:
         uint32_t ticks_per_quarter = 480;
         uint32_t default_tempo_bpm = 120;
     };
+
+    // NES pattern parsing helper functions
+    bool parse_nes_pattern_json(const std::string& json_content, music_data& output, enhanced_music_metadata& metadata);
+    bool parse_nes_pattern_text(std::ifstream& file, music_data& output, enhanced_music_metadata& metadata);
+    void extract_metadata_from_json(const std::string& json_content, enhanced_music_metadata& metadata);
+    void parse_channel_from_json(const std::string& json_content, const std::string& channel_name, uint8_t channel_id, music_data& output);
+    bool validate_nes_pattern_json_structure(const std::string& content, std::vector<std::string>& errors);
+    bool validate_nes_pattern_text_structure(const std::string& content, std::vector<std::string>& errors);
+    std::string escape_json_string(const std::string& str);
 };
 
 // Comprehensive file manager

@@ -36,7 +36,6 @@ add_definitions(
 # Our project sources
 set(PROJECT_SOURCES
     src/main.cpp
-    src/machine_stub.cpp
     src/music_parser.cpp
     src/audio_device.cpp
     src/register_mapping.cpp

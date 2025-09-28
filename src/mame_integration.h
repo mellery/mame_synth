@@ -24,7 +24,7 @@ class device_t;
 
 /**
  * Minimal machine context for MAME devices
- * This replaces our handle-based machine_stub with a real MAME interface
+ * Provides the minimal MAME environment needed for audio device operation
  */
 class mame_machine_context {
 public:

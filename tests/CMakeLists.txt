@@ -33,7 +33,6 @@ set(TEST_SOURCES
 
 # Source files to test (exclude main.cpp)
 set(LIB_SOURCES
-    ../src/machine_stub.cpp
     ../src/music_parser.cpp
     ../src/audio_device.cpp
     ../src/register_mapping.cpp
@@ -74,7 +73,6 @@ add_executable(mame_integration_tests
     ../src/music_parser.cpp
     ../src/nes_config.cpp
     ../src/register_mapping.cpp
-    ../src/machine_stub.cpp
 )
 
 # Link audio libraries to tests as well
