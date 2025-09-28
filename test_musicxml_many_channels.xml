@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <work>
+    <work-title>Too Many Channels Test</work-title>
+  </work>
+  <identification>
+    <creator type="composer">Channel Overflow Composer</creator>
+  </identification>
+
+  <part-list>
+    <score-part id="P1">
+      <part-name>Violin 1</part-name>
+      <midi-instrument><midi-channel>1</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P2">
+      <part-name>Violin 2</part-name>
+      <midi-instrument><midi-channel>2</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P3">
+      <part-name>Viola</part-name>
+      <midi-instrument><midi-channel>3</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P4">
+      <part-name>Cello</part-name>
+      <midi-instrument><midi-channel>4</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P5">
+      <part-name>Bass</part-name>
+      <midi-instrument><midi-channel>5</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P6">
+      <part-name>Flute</part-name>
+      <midi-instrument><midi-channel>6</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P7">
+      <part-name>Trumpet</part-name>
+      <midi-instrument><midi-channel>7</midi-channel></midi-instrument>
+    </score-part>
+    <score-part id="P8">
+      <part-name>Drums</part-name>
+      <midi-instrument><midi-channel>10</midi-channel></midi-instrument>
+    </score-part>
+  </part-list>
+
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>G</step><octave>5</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P2">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P3">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P4">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P5">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P6">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>C</step><octave>6</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P7">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>16</duration></note>
+    </measure>
+  </part>
+
+  <part id="P8">
+    <measure number="1">
+      <attributes><divisions>4</divisions></attributes>
+      <note><pitch><step>C</step><octave>6</octave></pitch><duration>4</duration></note>
+      <note><pitch><step>C</step><octave>6</octave></pitch><duration>4</duration></note>
+      <note><pitch><step>C</step><octave>6</octave></pitch><duration>4</duration></note>
+      <note><pitch><step>C</step><octave>6</octave></pitch><duration>4</duration></note>
+    </measure>
+  </part>
+</score-partwise>

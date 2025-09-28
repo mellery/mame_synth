@@ -4,6 +4,11 @@
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
+#include <set>
+#include <map>
+#include <limits>
+#include <filesystem>
+#include <chrono>
 
 // Helper function implementations
 std::string enhanced_music_metadata::format_duration() const {
@@ -391,11 +396,54 @@ enhanced_musicxml_parser::enhanced_musicxml_parser() = default;
 enhanced_musicxml_parser::~enhanced_musicxml_parser() = default;
 
 bool enhanced_musicxml_parser::parse_file_enhanced(const std::string& filename, music_data& output, enhanced_music_metadata& metadata) {
-    // TODO: Implement MusicXML parsing
+    // Use the core MusicXML parser for the actual parsing
+    musicxml_parser core_parser;
+    bool success = core_parser.parse_file(filename, output);
+
+    if (!success) {
+        return false;
+    }
+
+    // Extract enhanced metadata
     metadata.filename = filename;
     metadata.file_format = "MusicXML";
     metadata.file_size_bytes = file_support_utils::get_file_size(filename);
-    return false;
+    metadata.modification_time = file_support_utils::get_file_modification_time(filename);
+
+    // Copy basic metadata from core parser
+    metadata.title = output.metadata().title;
+    metadata.composer = output.metadata().composer;
+    metadata.ticks_per_quarter = output.metadata().ticks_per_quarter;
+
+    // Analyze music data for enhanced metadata
+    metadata.track_count = 1; // Simplified for now
+    metadata.total_notes = static_cast<uint32_t>(output.note_count());
+
+    // Calculate timing information from notes
+    music_time_t max_time = 0;
+    if (!output.notes().empty()) {
+        metadata.first_note_time = output.notes()[0].start;
+        for (const auto& note : output.notes()) {
+            music_time_t note_end = note.start + note.duration;
+            if (note_end > max_time) {
+                max_time = note_end;
+            }
+            if (note.start < metadata.first_note_time) {
+                metadata.first_note_time = note.start;
+            }
+        }
+    }
+
+    metadata.last_note_time = max_time;
+    metadata.total_ticks = max_time;
+
+    // Extract additional MusicXML metadata from the XML file
+    extract_musicxml_metadata(metadata);
+
+    // Analyze NES compatibility
+    analyze_nes_compatibility(output, metadata);
+
+    return true;
 }
 
 file_validation_result enhanced_musicxml_parser::validate_file(const std::string& filename) {
@@ -407,13 +455,51 @@ file_validation_result enhanced_musicxml_parser::validate_file(const std::string
         return result;
     }
 
-    std::vector<std::string> xml_errors;
-    if (!validate_xml_structure(filename, xml_errors)) {
-        result.errors = xml_errors;
+#ifdef HAVE_PUGIXML
+    // Validate XML structure using pugixml
+    pugi::xml_document doc;
+    pugi::xml_parse_result parse_result = doc.load_file(filename.c_str());
+
+    if (!parse_result) {
+        result.errors.push_back("XML parsing error: " + std::string(parse_result.description()));
+        result.errors.push_back("At offset: " + std::to_string(parse_result.offset));
         return result;
     }
 
+    // Check for valid MusicXML root element
+    pugi::xml_node root = doc.child("score-partwise");
+    if (!root) {
+        root = doc.child("score-timewise");
+    }
+
+    if (!root) {
+        result.errors.push_back("Invalid MusicXML: missing score-partwise or score-timewise root element");
+        return result;
+    }
+
+    // Check for required elements
+    if (!root.child("part-list")) {
+        result.warnings.push_back("Missing part-list element");
+    }
+
+    // Count parts
+    int part_count = 0;
+    for (pugi::xml_node part : root.children("part")) {
+        part_count++;
+    }
+
+    if (part_count == 0) {
+        result.warnings.push_back("No musical parts found");
+    } else {
+        result.info_messages.push_back("Found " + std::to_string(part_count) + " musical parts");
+    }
+
     result.is_valid = true;
+#else
+    result.warnings.push_back("MusicXML validation limited - pugixml not available");
+    result.is_valid = true; // Assume valid if we can't check properly
+#endif
+
     return result;
 }
 
@@ -423,8 +509,201 @@ bool enhanced_musicxml_parser::can_parse_file(const std::string& filename) {
 }
 
 bool enhanced_musicxml_parser::optimize_for_nes(music_data& data, enhanced_music_metadata& metadata) {
-    // TODO: Implement NES optimization for MusicXML
-    return false;
+    bool optimized = false;
+
+    // Step 1: Analyze current music data
+    auto [min_time, max_time] = file_support_utils::get_time_range(data);
+    auto channels_used = file_support_utils::get_channels_used(data);
+
+    // Step 2: Advanced channel assignment algorithm
+    struct channel_analysis {
+        std::vector<music_note> notes;
+        uint8_t suggested_nes_channel;
+        double average_pitch;
+        double rhythmic_complexity;
+        bool is_melodic;
+        bool is_bass;
+        bool is_percussive;
+    };
+
+    std::map<uint8_t, channel_analysis> channel_data;
+
+    // Analyze each original channel
+    for (const auto& note : data.notes()) {
+        channel_data[note.channel].notes.push_back(note);
+    }
+
+    // Calculate analysis metrics for each channel
+    for (auto& [channel, analysis] : channel_data) {
+        if (analysis.notes.empty()) continue;
+
+        // Calculate average pitch
+        double total_pitch = 0;
+        for (const auto& note : analysis.notes) {
+            total_pitch += note.note;
+        }
+        analysis.average_pitch = total_pitch / analysis.notes.size();
+
+        // Determine musical role
+        analysis.is_bass = analysis.average_pitch < 50;       // Below D3
+        analysis.is_melodic = analysis.average_pitch >= 60;   // Above C4
+        analysis.is_percussive = false; // TODO: Detect percussion patterns
+
+        // Calculate rhythmic complexity (note density)
+        if (max_time > min_time) {
+            double time_span = static_cast<double>(max_time - min_time);
+            analysis.rhythmic_complexity = analysis.notes.size() / time_span;
+        } else {
+            analysis.rhythmic_complexity = 0;
+        }
+    }
+
+    // Step 3: Intelligent NES channel assignment
+    struct nes_channel_assignment {
+        uint8_t original_channel;
+        uint8_t nes_channel;
+        std::string reason;
+    };
+
+    std::vector<nes_channel_assignment> assignments;
+    std::vector<bool> nes_channels_used(5, false); // 5 NES channels
+
+    // Priority assignment order:
+    // 1. Bass parts -> Triangle channel (2)
+    // 2. Melodic parts -> Pulse channels (0, 1)
+    // 3. Percussive -> Noise channel (3)
+    // 4. Remaining -> DMC or remaining pulse
+
+    // Assign bass parts to triangle channel
+    for (const auto& [channel, analysis] : channel_data) {
+        if (analysis.is_bass && !nes_channels_used[2]) {
+            assignments.push_back({channel, 2, "Bass part assigned to triangle channel"});
+            nes_channels_used[2] = true;
+            optimized = true;
+        }
+    }
+
+    // Assign melodic parts to pulse channels
+    uint8_t pulse_channel = 0;
+    for (const auto& [channel, analysis] : channel_data) {
+        if (analysis.is_melodic && pulse_channel < 2) {
+            assignments.push_back({channel, pulse_channel,
+                                 "Melodic part assigned to pulse channel " + std::to_string(pulse_channel)});
+            nes_channels_used[pulse_channel] = true;
+            pulse_channel++;
+            optimized = true;
+        }
+    }
+
+    // Assign remaining channels
+    uint8_t next_available = 0;
+    for (const auto& [channel, analysis] : channel_data) {
+        // Skip if already assigned
+        bool already_assigned = false;
+        for (const auto& assignment : assignments) {
+            if (assignment.original_channel == channel) {
+                already_assigned = true;
+                break;
+            }
+        }
+        if (already_assigned) continue;
+
+        // Find next available NES channel
+        while (next_available < 5 && nes_channels_used[next_available]) {
+            next_available++;
+        }
+
+        if (next_available < 5) {
+            std::string reason = "Assigned to available NES channel " + std::to_string(next_available);
+            assignments.push_back({channel, next_available, reason});
+            nes_channels_used[next_available] = true;
+            optimized = true;
+        } else {
+            // No more channels available - merge with existing
+            assignments.push_back({channel, 0, "Merged with pulse channel 0 (channel limit exceeded)"});
+            optimized = true;
+        }
+    }
+
+    // Step 4: Apply channel reassignments and optimizations
+    auto notes_copy = data.notes();
+    auto programs_copy = data.programs();
+    auto controls_copy = data.controls();
+    auto tempos_copy = data.tempos();
+
+    data.clear();
+
+    // Create channel mapping
+    std::map<uint8_t, uint8_t> channel_mapping;
+    for (const auto& assignment : assignments) {
+        channel_mapping[assignment.original_channel] = assignment.nes_channel;
+        metadata.nes_analysis.optimization_suggestions.push_back(assignment.reason);
+    }
+
+    // Apply optimizations to notes
+    for (auto note : notes_copy) {
+        // Apply channel remapping
+        if (channel_mapping.find(note.channel) != channel_mapping.end()) {
+            note.channel = channel_mapping[note.channel];
+        }
+
+        // Channel-specific optimizations
+        if (note.channel == 2) {
+            // Triangle channel: No volume control, optimize for bass
+            note.velocity = 127;
+            if (note.note < 21) note.note = 21;
+            if (note.note > 86) note.note = 86;
+        } else if (note.channel == 3) {
+            // Noise channel: Map pitches to noise periods
+            note.note = map_pitch_to_noise_period(note.note);
+        } else if (note.channel <= 1) {
+            // Pulse channels: Full range but clamp extremes
+            if (note.note < 24) note.note = 24;
+            if (note.note > 107) note.note = 107;
+        }
+
+        // General NES range clamping
+        if (note.note < 21) {
+            note.note = 21;
+            optimized = true;
+        }
+        if (note.note > 108) {
+            note.note = 108;
+            optimized = true;
+        }
+
+        data.add_note(note);
+    }
+
+    // Copy other events with channel remapping
+    for (auto program : programs_copy) {
+        if (channel_mapping.find(program.channel) != channel_mapping.end()) {
+            program.channel = channel_mapping[program.channel];
+        }
+        data.add_program(program);
+    }
+
+    for (auto control : controls_copy) {
+        if (channel_mapping.find(control.channel) != channel_mapping.end()) {
+            control.channel = channel_mapping[control.channel];
+        }
+        // Note: Many controls may not work on NES, but we preserve them
+        data.add_control(control);
+    }
+
+    for (const auto& tempo : tempos_copy) {
+        data.add_tempo(tempo);
+    }
+
+    // Step 5: Update detailed NES analysis
+    update_nes_analysis_detailed(data, metadata);
+
+    if (optimized) {
+        metadata.nes_analysis.optimization_suggestions.push_back(
+            "Applied advanced NES optimization with intelligent channel assignment");
+    }
+
+    return optimized;
 }
 
 bool enhanced_musicxml_parser::validate_xml_structure(const std::string& filename, std::vector<std::string>& errors) {
@@ -453,7 +732,221 @@ bool enhanced_musicxml_parser::validate_xml_structure(const std::string& filenam
 }
 
 void enhanced_musicxml_parser::extract_musicxml_metadata(enhanced_music_metadata& metadata) {
-    // TODO: Extract metadata from parsed MusicXML
+#ifdef HAVE_PUGIXML
+    // Parse the file again to extract detailed metadata
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_file(metadata.filename.c_str());
+
+    if (!result) {
+        return; // Skip metadata extraction if file can't be parsed
+    }
+
+    pugi::xml_node root = doc.child("score-partwise");
+    if (!root) {
+        root = doc.child("score-timewise");
+    }
+
+    if (!root) {
+        return;
+    }
+
+    // Extract work information
+    pugi::xml_node work = root.child("work");
+    if (work) {
+        pugi::xml_node work_number = work.child("work-number");
+        pugi::xml_node work_title = work.child("work-title");
+        pugi::xml_node opus = work.child("opus");
+
+        if (work_number && metadata.title.empty()) {
+            metadata.title = work_number.text().as_string();
+        }
+        if (work_title) {
+            if (metadata.title.empty()) {
+                metadata.title = work_title.text().as_string();
+            }
+            metadata.album = work_title.text().as_string(); // Use work-title as album
+        }
+    }
+
+    // Extract identification information
+    pugi::xml_node identification = root.child("identification");
+    if (identification) {
+        // Extract creators
+        for (pugi::xml_node creator : identification.children("creator")) {
+            std::string type = creator.attribute("type").as_string();
+            std::string name = creator.text().as_string();
+
+            if (type == "composer") {
+                metadata.composer = name;
+            } else if (type == "lyricist") {
+                metadata.arranger = name; // Use lyricist as arranger if no arranger
+            } else if (type == "arranger") {
+                metadata.arranger = name;
+            }
+        }
+
+        // Extract rights (copyright)
+        pugi::xml_node rights = identification.child("rights");
+        if (rights) {
+            metadata.copyright = rights.text().as_string();
+        }
+
+        // Extract encoding information for additional metadata
+        pugi::xml_node encoding = identification.child("encoding");
+        if (encoding) {
+            pugi::xml_node software = encoding.child("software");
+            if (software) {
+                metadata.comments = "Created with: " + std::string(software.text().as_string());
+            }
+        }
+    }
+
+    // Extract defaults and attributes
+    pugi::xml_node defaults = root.child("defaults");
+    if (defaults) {
+        // Could extract default tempo, key signature, etc.
+    }
+
+    // Set genre as classical by default for MusicXML
+    if (metadata.genre.empty()) {
+        metadata.genre = "Classical";
+    }
+#endif
+}
+
+void enhanced_musicxml_parser::analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata) {
+    // Analyze how well the MusicXML data works with NES APU
+    std::map<uint8_t, int> channel_counts;
+    int min_note = 127, max_note = 0;
+
+    // Analyze notes across all channels
+    for (const auto& note : data.notes()) {
+        channel_counts[note.channel]++;
+        if (note.note < min_note) min_note = note.note;
+        if (note.note > max_note) max_note = note.note;
+    }
+
+    metadata.nes_analysis.is_nes_compatible = channel_counts.size() <= 5;
+
+    if (channel_counts.size() > 5) {
+        metadata.nes_analysis.compatibility_warnings.push_back("More than 5 channels used - some notes may conflict");
+    }
+
+    // Check for out-of-range notes
+    if (data.note_count() > 0 && (min_note < 21 || max_note > 108)) {
+        metadata.nes_analysis.compatibility_warnings.push_back(
+            "Notes outside typical NES range (A0-B7)"
+        );
+    }
+
+    // Set usage percentages based on channel activity
+    size_t channel_index = 0;
+    for (const auto& [channel, count] : channel_counts) {
+        if (channel_index >= 5) break;
+
+        int usage_percent = std::min(100, (count * 100) / static_cast<int>(metadata.total_notes + 1));
+
+        if (channel_index == 0) metadata.nes_analysis.pulse1_usage_percentage = usage_percent;
+        else if (channel_index == 1) metadata.nes_analysis.pulse2_usage_percentage = usage_percent;
+        else if (channel_index == 2) metadata.nes_analysis.triangle_usage_percentage = usage_percent;
+        else if (channel_index == 3) metadata.nes_analysis.noise_usage_percentage = usage_percent;
+        else if (channel_index == 4) metadata.nes_analysis.dmc_usage_percentage = usage_percent;
+
+        channel_index++;
+    }
+
+    // Add optimization suggestions
+    if (channel_counts.size() > 2) {
+        metadata.nes_analysis.optimization_suggestions.push_back("Consider using pulse channels for melody");
+    }
+    if (channel_counts.size() > 3) {
+        metadata.nes_analysis.optimization_suggestions.push_back("Use triangle channel for bass lines");
+    }
+}
+
+void enhanced_musicxml_parser::update_nes_analysis_detailed(const music_data& data, enhanced_music_metadata& metadata) {
+    // Reset analysis
+    metadata.nes_analysis.pulse1_usage_percentage = 0;
+    metadata.nes_analysis.pulse2_usage_percentage = 0;
+    metadata.nes_analysis.triangle_usage_percentage = 0;
+    metadata.nes_analysis.noise_usage_percentage = 0;
+    metadata.nes_analysis.dmc_usage_percentage = 0;
+
+    // Count notes per NES channel
+    std::map<uint8_t, int> channel_note_counts;
+    for (const auto& note : data.notes()) {
+        if (note.channel < 5) {
+            channel_note_counts[note.channel]++;
+        }
+    }
+
+    // Calculate usage percentages
+    int total_notes = static_cast<int>(data.note_count());
+    if (total_notes > 0) {
+        metadata.nes_analysis.pulse1_usage_percentage =
+            static_cast<uint8_t>((channel_note_counts[0] * 100) / total_notes);
+        metadata.nes_analysis.pulse2_usage_percentage =
+            static_cast<uint8_t>((channel_note_counts[1] * 100) / total_notes);
+        metadata.nes_analysis.triangle_usage_percentage =
+            static_cast<uint8_t>((channel_note_counts[2] * 100) / total_notes);
+        metadata.nes_analysis.noise_usage_percentage =
+            static_cast<uint8_t>((channel_note_counts[3] * 100) / total_notes);
+        metadata.nes_analysis.dmc_usage_percentage =
+            static_cast<uint8_t>((channel_note_counts[4] * 100) / total_notes);
+    }
+
+    // Determine overall compatibility
+    auto channels_used = file_support_utils::get_channels_used(data);
+    metadata.nes_analysis.is_nes_compatible = channels_used.size() <= 5;
+
+    // Add detailed compatibility warnings
+    auto limitations = file_support_utils::analyze_nes_limitations(data);
+    for (const auto& limitation : limitations) {
+        if (limitation != "No significant NES limitations detected") {
+            metadata.nes_analysis.compatibility_warnings.push_back(limitation);
+        }
+    }
+
+    // Add optimization suggestions based on analysis
+    if (metadata.nes_analysis.pulse1_usage_percentage == 0 &&
+        metadata.nes_analysis.pulse2_usage_percentage == 0) {
+        metadata.nes_analysis.optimization_suggestions.push_back(
+            "Consider using pulse channels for melodic content");
+    }
+
+    if (metadata.nes_analysis.triangle_usage_percentage == 0 &&
+        channel_note_counts[0] + channel_note_counts[1] > 0) {
+        metadata.nes_analysis.optimization_suggestions.push_back(
+            "Consider using triangle channel for bass lines");
+    }
+
+    if (channels_used.size() > 5) {
+        metadata.nes_analysis.optimization_suggestions.push_back(
+            "Reduce to 5 channels or fewer for full NES compatibility");
+    }
+}
+
+uint8_t enhanced_musicxml_parser::map_pitch_to_noise_period(uint8_t pitch) {
+    // NES noise channel has 16 different periods (0-15)
+    // Map MIDI pitch range to these periods
+    // Higher pitches = lower periods (higher frequencies)
+
+    if (pitch >= 96) return 0;  // Very high pitch -> period 0 (highest freq)
+    else if (pitch >= 84) return 1;
+    else if (pitch >= 72) return 2;
+    else if (pitch >= 66) return 3;
+    else if (pitch >= 60) return 4;  // Middle C
+    else if (pitch >= 54) return 5;
+    else if (pitch >= 48) return 6;
+    else if (pitch >= 42) return 7;
+    else if (pitch >= 36) return 8;
+    else if (pitch >= 30) return 9;
+    else if (pitch >= 24) return 10;
+    else if (pitch >= 18) return 11;
+    else if (pitch >= 12) return 12;
+    else if (pitch >= 6) return 13;
+    else if (pitch >= 1) return 14;
+    else return 15;  // Very low pitch -> period 15 (lowest freq)
 }
 
 // NES Pattern Parser Implementation
@@ -716,18 +1209,68 @@ std::string sanitize_filename(const std::string& filename) {
 }
 
 std::vector<uint8_t> get_channels_used(const music_data& data) {
-    // TODO: Implement based on music_data interface
-    return {};
+    std::set<uint8_t> channels_set;
+
+    // Collect channels from notes
+    for (const auto& note : data.notes()) {
+        channels_set.insert(note.channel);
+    }
+
+    // Collect channels from controls
+    for (const auto& control : data.controls()) {
+        channels_set.insert(control.channel);
+    }
+
+    // Collect channels from programs
+    for (const auto& program : data.programs()) {
+        channels_set.insert(program.channel);
+    }
+
+    return std::vector<uint8_t>(channels_set.begin(), channels_set.end());
 }
 
 std::pair<music_time_t, music_time_t> get_time_range(const music_data& data) {
-    // TODO: Implement based on music_data interface
-    return {0, 0};
+    if (data.empty()) {
+        return {0, 0};
+    }
+
+    music_time_t min_time = std::numeric_limits<music_time_t>::max();
+    music_time_t max_time = 0;
+
+    // Check notes
+    for (const auto& note : data.notes()) {
+        min_time = std::min(min_time, note.start);
+        max_time = std::max(max_time, note.start + note.duration);
+    }
+
+    // Check controls
+    for (const auto& control : data.controls()) {
+        min_time = std::min(min_time, control.time);
+        max_time = std::max(max_time, control.time);
+    }
+
+    // Check programs
+    for (const auto& program : data.programs()) {
+        min_time = std::min(min_time, program.time);
+        max_time = std::max(max_time, program.time);
+    }
+
+    // Check tempos
+    for (const auto& tempo : data.tempos()) {
+        min_time = std::min(min_time, tempo.time);
+        max_time = std::max(max_time, tempo.time);
+    }
+
+    // Handle case where no events found
+    if (min_time == std::numeric_limits<music_time_t>::max()) {
+        min_time = 0;
+    }
+
+    return {min_time, max_time};
 }
 
 uint32_t count_tempo_changes(const music_data& data) {
-    // TODO: Implement based on music_data interface
-    return 0;
+    return static_cast<uint32_t>(data.tempos().size());
 }
 
 bool is_note_in_nes_range(uint8_t note) {
@@ -748,7 +1291,80 @@ uint8_t suggest_nes_channel_for_note(uint8_t note, uint8_t velocity) {
 
 std::vector<std::string> analyze_nes_limitations(const music_data& data) {
     std::vector<std::string> limitations;
-    // TODO: Implement comprehensive NES limitation analysis
+
+    // Check total number of channels
+    auto channels_used = get_channels_used(data);
+    if (channels_used.size() > 5) {
+        limitations.push_back("Uses " + std::to_string(channels_used.size()) +
+                            " channels (NES APU has only 5 channels)");
+    }
+
+    // Check note range compatibility
+    int out_of_range_notes = 0;
+    uint8_t lowest_note = 127, highest_note = 0;
+
+    for (const auto& note : data.notes()) {
+        if (!is_note_in_nes_range(note.note)) {
+            out_of_range_notes++;
+        }
+        if (!data.notes().empty()) {
+            lowest_note = std::min(lowest_note, note.note);
+            highest_note = std::max(highest_note, note.note);
+        }
+    }
+
+    if (out_of_range_notes > 0) {
+        limitations.push_back(std::to_string(out_of_range_notes) +
+                            " notes outside NES frequency range");
+    }
+
+    // Check for polyphony per channel
+    std::map<uint8_t, std::vector<music_time_t>> channel_note_times;
+    for (const auto& note : data.notes()) {
+        channel_note_times[note.channel].push_back(note.start);
+    }
+
+    for (const auto& [channel, times] : channel_note_times) {
+        // Check for overlapping notes on same channel
+        auto sorted_times = times;
+        std::sort(sorted_times.begin(), sorted_times.end());
+
+        int max_simultaneous = 1;
+        int current_simultaneous = 1;
+
+        for (size_t i = 1; i < sorted_times.size(); ++i) {
+            if (sorted_times[i] == sorted_times[i-1]) {
+                current_simultaneous++;
+                max_simultaneous = std::max(max_simultaneous, current_simultaneous);
+            } else {
+                current_simultaneous = 1;
+            }
+        }
+
+        if (max_simultaneous > 1) {
+            limitations.push_back("Channel " + std::to_string(channel) +
+                                " has " + std::to_string(max_simultaneous) +
+                                " simultaneous notes (NES channels are monophonic)");
+        }
+    }
+
+    // Check for excessive tempo changes
+    if (data.tempos().size() > 10) {
+        limitations.push_back("High number of tempo changes (" +
+                            std::to_string(data.tempos().size()) +
+                            ") may impact NES performance");
+    }
+
+    // Check for control changes that NES can't handle
+    if (!data.controls().empty()) {
+        limitations.push_back("Contains " + std::to_string(data.controls().size()) +
+                            " control changes (NES APU has limited control capabilities)");
+    }
+
+    if (limitations.empty()) {
+        limitations.push_back("No significant NES limitations detected");
+    }
+
     return limitations;
 }
 

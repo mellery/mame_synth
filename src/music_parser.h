@@ -8,6 +8,10 @@
 #include <vector>
 #include <cstdint>
 
+#ifdef HAVE_PUGIXML
+#include <pugixml.hpp>
+#endif
+
 // Forward declarations
 class music_event;
 class music_track;
@@ -164,7 +168,7 @@ private:
     uint16_t read_uint16_be(const uint8_t* data);
 };
 
-// MusicXML parser stub (placeholder for future implementation)
+// MusicXML parser implementation
 class musicxml_parser : public music_parser {
 public:
     musicxml_parser();
@@ -175,7 +179,37 @@ public:
     std::string get_last_error() const override { return m_last_error; }
     bool supports_extension(const std::string& ext) const override;
 
-    // TODO: Implement MusicXML parsing in future task
+private:
+#ifdef HAVE_PUGIXML
+
+    // Internal structure for part information
+    struct part_info {
+        std::string id;
+        std::string name;
+        int midi_channel = 0;
+        int midi_program = 0;
+    };
+
+    // Main parsing methods
+    bool parse_musicxml_document(const pugi::xml_document& doc, music_data& data);
+    void parse_work_info(const pugi::xml_node& root, music_metadata& metadata);
+    bool parse_part_list(const pugi::xml_node& part_list, std::vector<part_info>& parts);
+    bool parse_partwise_score(const pugi::xml_node& root, const std::vector<part_info>& parts, music_data& data);
+    bool parse_timewise_score(const pugi::xml_node& root, const std::vector<part_info>& parts, music_data& data);
+
+    // Measure and note parsing
+    music_time_t parse_measure(const pugi::xml_node& measure, uint8_t channel,
+                               music_time_t start_time, int& divisions, music_data& data);
+    music_time_t parse_note(const pugi::xml_node& note, uint8_t channel,
+                            music_time_t start_time, int divisions, music_data& data);
+    void parse_measure_content(const pugi::xml_node& part, uint8_t channel,
+                               music_time_t start_time, int divisions, music_data& data);
+
+    // Utility methods
+    uint8_t convert_pitch_to_midi(const std::string& step, int octave, int alter);
+    uint8_t parse_dynamics(const pugi::xml_node& dynamics);
+    music_time_t calculate_measure_duration(const pugi::xml_node& measure, int divisions);
+#endif
 };
 
 // Parser factory for automatic format detection

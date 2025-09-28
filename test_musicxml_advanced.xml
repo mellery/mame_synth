@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <work>
+    <work-title>Advanced NES Test Suite</work-title>
+  </work>
+  <identification>
+    <creator type="composer">NES Composer</creator>
+    <creator type="arranger">Advanced Arranger</creator>
+    <rights>Copyright 2025 Enhanced MusicXML Parser</rights>
+  </identification>
+
+  <part-list>
+    <score-part id="P1">
+      <part-name>Melody</part-name>
+      <midi-instrument id="P1-I1">
+        <midi-channel>1</midi-channel>
+        <midi-program>1</midi-program>
+      </midi-instrument>
+    </score-part>
+    <score-part id="P2">
+      <part-name>Harmony</part-name>
+      <midi-instrument id="P2-I1">
+        <midi-channel>2</midi-channel>
+        <midi-program>1</midi-program>
+      </midi-instrument>
+    </score-part>
+    <score-part id="P3">
+      <part-name>Bass</part-name>
+      <midi-instrument id="P3-I1">
+        <midi-channel>3</midi-channel>
+        <midi-program>33</midi-program>
+      </midi-instrument>
+    </score-part>
+    <score-part id="P4">
+      <part-name>Percussion</part-name>
+      <midi-instrument id="P4-I1">
+        <midi-channel>10</midi-channel>
+        <midi-program>1</midi-program>
+      </midi-instrument>
+    </score-part>
+  </part-list>
+
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <time>
+          <beats>4</beats>
+          <beat-type>4</beat-type>
+        </time>
+      </attributes>
+
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <notations>
+          <dynamics>
+            <f/>
+          </dynamics>
+        </notations>
+      </note>
+
+      <note>
+        <pitch>
+          <step>D</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+      </note>
+
+      <note>
+        <pitch>
+          <step>E</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+      </note>
+
+      <note>
+        <pitch>
+          <step>F</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+      </note>
+    </measure>
+  </part>
+
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+      </attributes>
+
+      <note>
+        <pitch>
+          <step>E</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>8</duration>
+        <type>half</type>
+        <notations>
+          <dynamics>
+            <mf/>
+          </dynamics>
+        </notations>
+      </note>
+
+      <note>
+        <pitch>
+          <step>G</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>8</duration>
+        <type>half</type>
+      </note>
+    </measure>
+  </part>
+
+  <part id="P3">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+      </attributes>
+
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>3</octave>
+        </pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <notations>
+          <dynamics>
+            <p/>
+          </dynamics>
+        </notations>
+      </note>
+    </measure>
+  </part>
+
+  <part id="P4">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+      </attributes>
+
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>6</octave>
+        </pitch>
+        <duration>2</duration>
+        <type>eighth</type>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <type>eighth</type>
+      </note>
+
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>6</octave>
+        </pitch>
+        <duration>2</duration>
+        <type>eighth</type>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <type>eighth</type>
+      </note>
+
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>6</octave>
+        </pitch>
+        <duration>2</duration>
+        <type>eighth</type>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>6</duration>
+        <type>quarter</type>
+        <dot/>
+      </note>
+    </measure>
+  </part>
+</score-partwise>

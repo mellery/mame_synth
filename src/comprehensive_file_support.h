@@ -192,6 +192,10 @@ public:
 private:
     bool validate_xml_structure(const std::string& filename, std::vector<std::string>& errors);
     void extract_musicxml_metadata(enhanced_music_metadata& metadata);
+    void analyze_nes_compatibility(const music_data& data, enhanced_music_metadata& metadata);
+    void update_nes_analysis_detailed(const music_data& data, enhanced_music_metadata& metadata);
+    uint8_t map_pitch_to_noise_period(uint8_t pitch);
+
 };
 
 // Enhanced pattern parser for native NES pattern format

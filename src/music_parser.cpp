@@ -3,6 +3,12 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <sstream>
+#include <cmath>
+
+#ifdef HAVE_PUGIXML
+#include <pugixml.hpp>
+#endif
 
 // MIDI Parser Implementation
 midi_parser::midi_parser() = default;
@@ -259,22 +265,51 @@ uint16_t midi_parser::read_uint16_be(const uint8_t* data) {
     return (data[0] << 8) | data[1];
 }
 
-// MusicXML Parser Stub Implementation
+// MusicXML Parser Implementation
 musicxml_parser::musicxml_parser() = default;
 
 bool musicxml_parser::parse_file(const std::string& filename, music_data& data) {
-    set_error("MusicXML parsing not yet implemented");
-    // TODO: Implement MusicXML parsing
-    // This is a placeholder for future development
-    std::cout << "MusicXML parser called for: " << filename << std::endl;
+#ifdef HAVE_PUGIXML
+    try {
+        pugi::xml_document doc;
+        pugi::xml_parse_result result = doc.load_file(filename.c_str());
+
+        if (!result) {
+            set_error("Failed to parse XML file: " + std::string(result.description()));
+            return false;
+        }
+
+        return parse_musicxml_document(doc, data);
+    } catch (const std::exception& e) {
+        set_error("Exception parsing MusicXML file: " + std::string(e.what()));
+        return false;
+    }
+#else
+    set_error("MusicXML support not available - pugixml library not found");
     return false;
+#endif
 }
 
 bool musicxml_parser::parse_buffer(const std::vector<uint8_t>& buffer, music_data& data) {
-    set_error("MusicXML parsing not yet implemented");
-    // TODO: Implement MusicXML parsing from buffer
-    std::cout << "MusicXML parser called with buffer size: " << buffer.size() << std::endl;
+#ifdef HAVE_PUGIXML
+    try {
+        pugi::xml_document doc;
+        pugi::xml_parse_result result = doc.load_buffer(buffer.data(), buffer.size());
+
+        if (!result) {
+            set_error("Failed to parse XML buffer: " + std::string(result.description()));
+            return false;
+        }
+
+        return parse_musicxml_document(doc, data);
+    } catch (const std::exception& e) {
+        set_error("Exception parsing MusicXML buffer: " + std::string(e.what()));
+        return false;
+    }
+#else
+    set_error("MusicXML support not available - pugixml library not found");
     return false;
+#endif
 }
 
 bool musicxml_parser::supports_extension(const std::string& ext) const {
@@ -282,6 +317,341 @@ bool musicxml_parser::supports_extension(const std::string& ext) const {
     std::transform(lower_ext.begin(), lower_ext.end(), lower_ext.begin(), ::tolower);
     return lower_ext == ".xml" || lower_ext == ".musicxml";
 }
+
+#ifdef HAVE_PUGIXML
+bool musicxml_parser::parse_musicxml_document(const pugi::xml_document& doc, music_data& data) {
+    // Find the root element - could be <score-partwise> or <score-timewise>
+    pugi::xml_node root = doc.child("score-partwise");
+    bool is_partwise = true;
+
+    if (!root) {
+        root = doc.child("score-timewise");
+        is_partwise = false;
+    }
+
+    if (!root) {
+        set_error("Invalid MusicXML: missing score-partwise or score-timewise root element");
+        return false;
+    }
+
+    // Initialize music data
+    data.clear();
+    data.metadata().ticks_per_quarter = 480; // Default MIDI-compatible value
+
+    // Parse work and movement information
+    parse_work_info(root, data.metadata());
+
+    // Parse part list to understand instruments
+    std::vector<part_info> parts;
+    if (!parse_part_list(root.child("part-list"), parts)) {
+        set_error("Failed to parse part-list");
+        return false;
+    }
+
+    // Parse musical content
+    if (is_partwise) {
+        return parse_partwise_score(root, parts, data);
+    } else {
+        return parse_timewise_score(root, parts, data);
+    }
+}
+
+void musicxml_parser::parse_work_info(const pugi::xml_node& root, music_metadata& metadata) {
+    // Parse work information
+    pugi::xml_node work = root.child("work");
+    if (work) {
+        pugi::xml_node work_title = work.child("work-title");
+        if (work_title) {
+            metadata.title = work_title.text().as_string();
+        }
+    }
+
+    // Parse movement information
+    pugi::xml_node movement_title = root.child("movement-title");
+    if (movement_title) {
+        if (metadata.title.empty()) {
+            metadata.title = movement_title.text().as_string();
+        }
+    }
+
+    // Parse identification for composer, etc.
+    pugi::xml_node identification = root.child("identification");
+    if (identification) {
+        for (pugi::xml_node creator : identification.children("creator")) {
+            std::string type = creator.attribute("type").as_string();
+            std::string name = creator.text().as_string();
+
+            if (type == "composer" && metadata.composer.empty()) {
+                metadata.composer = name;
+            }
+        }
+    }
+}
+
+bool musicxml_parser::parse_part_list(const pugi::xml_node& part_list, std::vector<part_info>& parts) {
+    if (!part_list) {
+        set_error("Missing part-list element");
+        return false;
+    }
+
+    for (pugi::xml_node score_part : part_list.children("score-part")) {
+        part_info part;
+        part.id = score_part.attribute("id").as_string();
+
+        pugi::xml_node part_name = score_part.child("part-name");
+        if (part_name) {
+            part.name = part_name.text().as_string();
+        }
+
+        // Parse MIDI instrument information
+        pugi::xml_node midi_instrument = score_part.child("midi-instrument");
+        if (midi_instrument) {
+            pugi::xml_node midi_channel = midi_instrument.child("midi-channel");
+            pugi::xml_node midi_program = midi_instrument.child("midi-program");
+
+            if (midi_channel) {
+                part.midi_channel = midi_channel.text().as_int() - 1; // Convert to 0-based
+            }
+            if (midi_program) {
+                part.midi_program = midi_program.text().as_int() - 1; // Convert to 0-based
+            }
+        }
+
+        parts.push_back(part);
+    }
+
+    return !parts.empty();
+}
+
+bool musicxml_parser::parse_partwise_score(const pugi::xml_node& root, const std::vector<part_info>& parts, music_data& data) {
+    // Parse each part
+    size_t part_index = 0;
+    for (pugi::xml_node part : root.children("part")) {
+        std::string part_id = part.attribute("id").as_string();
+
+        // Find corresponding part info
+        auto part_it = std::find_if(parts.begin(), parts.end(),
+            [&part_id](const part_info& p) { return p.id == part_id; });
+
+        if (part_it == parts.end()) {
+            continue; // Skip unknown parts
+        }
+
+        uint8_t channel = static_cast<uint8_t>(part_it->midi_channel);
+        uint8_t program = static_cast<uint8_t>(part_it->midi_program);
+
+        // Add program change if specified
+        if (program > 0) {
+            data.add_program(music_program(channel, program, 0));
+        }
+
+        // Parse measures in this part
+        music_time_t current_time = 0;
+        int current_divisions = 1;
+
+        for (pugi::xml_node measure : part.children("measure")) {
+            current_time = parse_measure(measure, channel, current_time, current_divisions, data);
+        }
+
+        part_index++;
+    }
+
+    // Update metadata
+    data.metadata().track_count = static_cast<uint16_t>(parts.size());
+
+    return true;
+}
+
+bool musicxml_parser::parse_timewise_score(const pugi::xml_node& root, const std::vector<part_info>& parts, music_data& data) {
+    // Add program changes for each part
+    for (size_t i = 0; i < parts.size(); ++i) {
+        uint8_t channel = static_cast<uint8_t>(parts[i].midi_channel);
+        uint8_t program = static_cast<uint8_t>(parts[i].midi_program);
+
+        if (program > 0) {
+            data.add_program(music_program(channel, program, 0));
+        }
+    }
+
+    // Parse measures (time-wise organization)
+    music_time_t current_time = 0;
+    int current_divisions = 1;
+
+    for (pugi::xml_node measure : root.children("measure")) {
+        // Each measure contains parts
+        size_t part_index = 0;
+        for (pugi::xml_node part : measure.children("part")) {
+            if (part_index >= parts.size()) {
+                break;
+            }
+
+            uint8_t channel = static_cast<uint8_t>(parts[part_index].midi_channel);
+            parse_measure_content(part, channel, current_time, current_divisions, data);
+            part_index++;
+        }
+
+        // Advance time by measure duration
+        current_time += calculate_measure_duration(measure, current_divisions);
+    }
+
+    // Update metadata
+    data.metadata().track_count = static_cast<uint16_t>(parts.size());
+
+    return true;
+}
+
+music_time_t musicxml_parser::parse_measure(const pugi::xml_node& measure, uint8_t channel,
+                                          music_time_t start_time, int& divisions, music_data& data) {
+    music_time_t current_time = start_time;
+
+    // Parse attributes first (they might change divisions)
+    for (pugi::xml_node attributes : measure.children("attributes")) {
+        pugi::xml_node divisions_node = attributes.child("divisions");
+        if (divisions_node) {
+            divisions = divisions_node.text().as_int();
+        }
+    }
+
+    // Parse musical content
+    for (pugi::xml_node child : measure.children()) {
+        std::string name = child.name();
+
+        if (name == "note") {
+            current_time += parse_note(child, channel, current_time, divisions, data);
+        } else if (name == "backup") {
+            pugi::xml_node duration = child.child("duration");
+            if (duration) {
+                current_time -= duration.text().as_int() * (480 / divisions); // Use constant for now
+            }
+        } else if (name == "forward") {
+            pugi::xml_node duration = child.child("duration");
+            if (duration) {
+                current_time += duration.text().as_int() * (480 / divisions); // Use constant for now
+            }
+        }
+    }
+
+    return current_time;
+}
+
+music_time_t musicxml_parser::parse_note(const pugi::xml_node& note, uint8_t channel,
+                                        music_time_t start_time, int divisions, music_data& data) {
+    // Check if this is a rest
+    if (note.child("rest")) {
+        pugi::xml_node duration = note.child("duration");
+        if (duration) {
+            return duration.text().as_int() * (480 / divisions); // Use constant for now
+        }
+        return 0;
+    }
+
+    // Parse pitch
+    pugi::xml_node pitch = note.child("pitch");
+    if (!pitch) {
+        return 0; // Skip unpitched notes for now
+    }
+
+    std::string step = pitch.child("step").text().as_string();
+    int octave = pitch.child("octave").text().as_int();
+    int alter = 0;
+
+    pugi::xml_node alter_node = pitch.child("alter");
+    if (alter_node) {
+        alter = alter_node.text().as_int();
+    }
+
+    // Convert to MIDI note number
+    uint8_t midi_note = convert_pitch_to_midi(step, octave, alter);
+
+    // Parse duration
+    pugi::xml_node duration = note.child("duration");
+    music_time_t note_duration = 0;
+    if (duration) {
+        note_duration = duration.text().as_int() * (480 / divisions); // Use constant for now
+    }
+
+    // Parse velocity (dynamics)
+    uint8_t velocity = 64; // Default
+    pugi::xml_node notations = note.child("notations");
+    if (notations) {
+        // Look for dynamics
+        for (pugi::xml_node dynamics : notations.children("dynamics")) {
+            velocity = parse_dynamics(dynamics);
+            break;
+        }
+    }
+
+    // Add the note to music data (combining note on/off into single note)
+    if (note_duration > 0) {
+        music_note music_note_event(channel, midi_note, velocity, start_time, note_duration);
+        data.add_note(music_note_event);
+    }
+
+    return note_duration;
+}
+
+uint8_t musicxml_parser::convert_pitch_to_midi(const std::string& step, int octave, int alter) {
+    // Convert step to semitone within octave
+    int semitone = 0;
+    if (step == "C") semitone = 0;
+    else if (step == "D") semitone = 2;
+    else if (step == "E") semitone = 4;
+    else if (step == "F") semitone = 5;
+    else if (step == "G") semitone = 7;
+    else if (step == "A") semitone = 9;
+    else if (step == "B") semitone = 11;
+
+    // Apply alteration
+    semitone += alter;
+
+    // Calculate MIDI note number (C4 = 60)
+    int midi_note = (octave + 1) * 12 + semitone;
+
+    // Clamp to valid MIDI range
+    if (midi_note < 0) midi_note = 0;
+    if (midi_note > 127) midi_note = 127;
+
+    return static_cast<uint8_t>(midi_note);
+}
+
+uint8_t musicxml_parser::parse_dynamics(const pugi::xml_node& dynamics) {
+    // Map common dynamics markings to MIDI velocity
+    for (pugi::xml_node child : dynamics.children()) {
+        std::string name = child.name();
+
+        if (name == "ppp") return 16;
+        else if (name == "pp") return 32;
+        else if (name == "p") return 48;
+        else if (name == "mp") return 56;
+        else if (name == "mf") return 72;
+        else if (name == "f") return 88;
+        else if (name == "ff") return 104;
+        else if (name == "fff") return 120;
+    }
+
+    return 64; // Default mezzo-forte
+}
+
+music_time_t musicxml_parser::calculate_measure_duration(const pugi::xml_node& measure, int divisions) {
+    // This is a simplified calculation - real implementation would need time signatures
+    return 480 * 4; // Assume 4/4 time for now
+}
+
+void musicxml_parser::parse_measure_content(const pugi::xml_node& part, uint8_t channel,
+                                           music_time_t start_time, int divisions, music_data& data) {
+    // Similar to parse_measure but for timewise format
+    music_time_t current_time = start_time;
+
+    for (pugi::xml_node child : part.children()) {
+        std::string name = child.name();
+
+        if (name == "note") {
+            current_time += parse_note(child, channel, current_time, divisions, data);
+        }
+    }
+}
+
+#endif // HAVE_PUGIXML
 
 // Parser Factory Implementation
 std::unique_ptr<music_parser> music_parser_factory::create_parser(const std::string& filename) {

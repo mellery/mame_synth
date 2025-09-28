@@ -59,6 +59,37 @@ set(PROJECT_SOURCES
 # Create main executable
 add_executable(mame_synth ${PROJECT_SOURCES})
 
+# Find XML library for MusicXML support
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(PUGIXML pugixml)
+endif()
+
+if(NOT PUGIXML_FOUND)
+    # Try to find pugixml manually
+    find_path(PUGIXML_INCLUDE_DIR pugixml.hpp
+        PATHS /usr/include /usr/local/include /opt/local/include)
+    find_library(PUGIXML_LIBRARY pugixml
+        PATHS /usr/lib /usr/local/lib /opt/local/lib)
+
+    if(PUGIXML_INCLUDE_DIR AND PUGIXML_LIBRARY)
+        set(PUGIXML_FOUND TRUE)
+        set(PUGIXML_INCLUDE_DIRS ${PUGIXML_INCLUDE_DIR})
+        set(PUGIXML_LIBRARIES ${PUGIXML_LIBRARY})
+    endif()
+endif()
+
+if(PUGIXML_FOUND)
+    target_include_directories(mame_synth PRIVATE ${PUGIXML_INCLUDE_DIRS})
+    target_link_libraries(mame_synth ${PUGIXML_LIBRARIES})
+    target_compile_definitions(mame_synth PRIVATE HAVE_PUGIXML)
+    message(STATUS "Found pugixml: ${PUGIXML_LIBRARIES}")
+else()
+    message(WARNING "pugixml not found - MusicXML support will be disabled")
+    message(STATUS "To install pugixml on Ubuntu/Debian: sudo apt-get install libpugixml-dev")
+    message(STATUS "To install pugixml on macOS: brew install pugixml")
+endif()
+
 # Find and link audio libraries
 if(UNIX AND NOT APPLE)
     # Linux - use ALSA
