@@ -150,6 +150,7 @@ public:
     double get_tempo_scale() const { return m_tempo_scale; }
 
     void set_loop_enabled(bool enabled);
+    bool is_loop_enabled() const { return m_loop_enabled; }
     void set_loop_points(music_time_t start, music_time_t end);
 
     // Channel mapping for NES optimization

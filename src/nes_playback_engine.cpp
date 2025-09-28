@@ -1026,33 +1026,96 @@ std::unique_ptr<nes_playback_engine> nes_playback_engine_factory::create_for_int
 
 // Real-time control method implementations
 void nes_playback_engine::set_channel_volume(uint8_t channel, float volume) {
-    (void)channel; (void)volume; // Suppress unused parameter warnings
-    // Implementation would set channel volume through audio manager
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_audio_manager) {
+        return;
+    }
+
+    // Clamp volume to valid range
+    volume = std::max(0.0f, std::min(1.0f, volume));
+
+    // Set volume through the mixer
+    auto* mixer = m_audio_manager->get_nes_mixer();
+    if (mixer && channel < 5) { // NES has 5 channels (0-4)
+        mixer->set_channel_volume(channel, volume);
+        log_debug("Set channel " + std::to_string(channel) + " volume to " + std::to_string(volume));
+    }
 }
 
 void nes_playback_engine::mute_channel(uint8_t channel, bool mute) {
-    (void)channel; (void)mute; // Suppress unused parameter warnings
-    // Implementation would mute/unmute channel through audio manager
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_audio_manager) {
+        return;
+    }
+
+    // Mute/unmute through the mixer by setting volume to 0 or restoring
+    auto* mixer = m_audio_manager->get_nes_mixer();
+    if (mixer && channel < 5) { // NES has 5 channels (0-4)
+        if (mute) {
+            // Store current volume and set to 0
+            mixer->set_channel_volume(channel, 0.0f);
+            log_debug("Muted channel " + std::to_string(channel));
+        } else {
+            // For unmute, restore to 1.0f (could be enhanced to store previous volume)
+            mixer->set_channel_volume(channel, 1.0f);
+            log_debug("Unmuted channel " + std::to_string(channel));
+        }
+    }
 }
 
 void nes_playback_engine::set_pulse_duty_cycle(uint8_t channel, uint8_t duty) {
-    (void)channel; (void)duty; // Suppress unused parameter warnings
-    // Implementation would set pulse duty cycle through audio device
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_audio_manager) {
+        return;
+    }
+
+    // Clamp duty cycle to valid range (0-3)
+    duty = std::min(duty, uint8_t(3));
+
+    // Only pulse channels 0 and 1 support duty cycle
+    if (channel > 1) {
+        log_debug("Warning: set_pulse_duty_cycle called for non-pulse channel " + std::to_string(channel));
+        return;
+    }
+
+    // Get the NES APU device and set duty cycle
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    if (nes_device) {
+        nes_device->set_pulse_duty_cycle(channel, duty);
+        log_debug("Set pulse channel " + std::to_string(channel) + " duty cycle to " + std::to_string(duty));
+    } else {
+        log_debug("Warning: NES APU device not found for duty cycle setting");
+    }
 }
 
 void nes_playback_engine::set_triangle_linear_counter(uint8_t value) {
-    (void)value; // Suppress unused parameter warning
-    // Implementation would set triangle linear counter through audio device
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_audio_manager) {
+        return;
+    }
+
+    // Clamp value to valid range (0-127)
+    value = std::min(value, uint8_t(127));
+
+    // Get the NES APU device and set triangle linear counter
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    if (nes_device) {
+        nes_device->set_triangle_linear_counter(value);
+        log_debug("Set triangle linear counter to " + std::to_string(value));
+    } else {
+        log_debug("Warning: NES APU device not found for triangle linear counter setting");
+    }
 }
 
 void nes_playback_engine::set_noise_mode(bool short_mode) {
-    (void)short_mode; // Suppress unused parameter warning
-    // Implementation would set noise mode through audio device
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_audio_manager) {
+        return;
+    }
+
+    // Get the NES APU device and set noise mode
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    if (nes_device) {
+        nes_device->set_noise_mode(short_mode);
+        log_debug("Set noise mode to " + std::string(short_mode ? "short" : "long"));
+    } else {
+        log_debug("Warning: NES APU device not found for noise mode setting");
+    }
 }
 
 bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sample_rate) {
@@ -1186,13 +1249,42 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
 }
 
 void nes_playback_engine::set_loop_enabled(bool enabled) {
-    (void)enabled; // Suppress unused parameter warning
-    // Implementation would enable/disable looping
-    // For now, just stub to avoid linker errors
+    if (!m_initialized || !m_sequencer) {
+        return;
+    }
+
+    // Update configuration
+    m_config.enable_looping = enabled;
+
+    // Set looping in the sequencer
+    m_sequencer->set_loop_enabled(enabled);
+
+    log_debug("Loop " + std::string(enabled ? "enabled" : "disabled"));
 }
 
 bool nes_playback_engine::is_loop_enabled() const {
-    // Implementation would return loop state
-    // For now, just stub to avoid linker errors
-    return false;
+    if (!m_initialized || !m_sequencer) {
+        return m_config.enable_looping; // Return config value if sequencer not available
+    }
+
+    // Get loop state from sequencer
+    return m_sequencer->is_loop_enabled();
+}
+
+// Internal logging methods
+void nes_playback_engine::log_debug(const std::string& message) {
+    // Debug logging - can be disabled in release builds
+    #ifdef DEBUG
+    std::cout << "[DEBUG] NES Engine: " << message << std::endl;
+    #else
+    (void)message; // Suppress unused parameter warning in release builds
+    #endif
+}
+
+void nes_playback_engine::log_info(const std::string& message) {
+    std::cout << "[INFO] NES Engine: " << message << std::endl;
+}
+
+void nes_playback_engine::log_error(const std::string& message) {
+    std::cerr << "[ERROR] NES Engine: " << message << std::endl;
 }

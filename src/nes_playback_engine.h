@@ -195,7 +195,7 @@ public:
     // State and monitoring
     engine_state get_state() const { return m_state; }
     bool is_playing() const { return m_state == engine_state::PLAYING; }
-    bool is_ready() const { return m_state == engine_state::READY || m_state == engine_state::PAUSED; }
+    bool is_ready() const { return m_state == engine_state::INITIALIZED || m_state == engine_state::READY || m_state == engine_state::PAUSED; }
 
     performance_metrics get_performance_metrics() const;
     void reset_performance_metrics();

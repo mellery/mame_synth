@@ -27,6 +27,7 @@ set(TEST_SOURCES
     test_nes_config.cpp
     test_audio_stream.cpp
     test_nes_sequencer.cpp
+    test_nes_playback_engine.cpp
     test_end_to_end_integration.cpp
 )
 
