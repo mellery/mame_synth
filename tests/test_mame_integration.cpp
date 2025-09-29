@@ -61,14 +61,19 @@ void test_mame_nes_apu_device() {
     nes_specific->write_pulse1_timer_low(0xAA);    // $4002
     nes_specific->write_pulse1_timer_high(0x03);   // $4003
 
-    // Test audio output (should be silent in placeholder)
+    // Test audio output (should generate audio since we have a working implementation)
     std::vector<int16_t> buffer(1024, 0x1234); // Fill with non-zero pattern
     nes_device->update_audio_stream(buffer.data(), 1024);
 
-    // Verify buffer was cleared to silence
+    // Verify audio was generated (should have non-zero samples since pulse1 is configured)
+    bool has_audio = false;
     for (int16_t sample : buffer) {
-        assert(sample == 0);
+        if (sample != 0 && sample != 0x1234) { // Changed from original pattern
+            has_audio = true;
+            break;
+        }
     }
+    assert(has_audio); // Should generate audio, not silence
 
     assert(nes_device->get_sample_rate() == 44100);
 

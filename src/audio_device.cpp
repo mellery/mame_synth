@@ -172,15 +172,16 @@ bool nes_apu_device::stop_note(uint8_t channel, uint8_t note_number) {
     if (channel == 4) return false;
 
     if (m_channels[channel].active && m_channels[channel].note_number == note_number) {
-        m_channels[channel].active = false;
-        m_channels[channel].velocity = 0;
         std::cout << "NES APU: Stopped note " << static_cast<int>(note_number)
                   << " on channel " << static_cast<int>(channel) << std::endl;
 
-        // Sync to MAME device
-        if (m_mame_device) {
-            sync_to_mame_device();
-        }
+        // Mark channel as inactive and sync to MAME device
+        m_channels[channel].active = false;
+        m_channels[channel].note_number = 0;
+        m_channels[channel].velocity = 0;
+
+        // Sync the channel state to the MAME device
+        sync_to_mame_device();
 
         return true;
     }
@@ -342,7 +343,9 @@ uint8_t nes_apu_device::map_velocity_to_volume(uint8_t velocity) const {
 }
 
 void nes_apu_device::sync_to_mame_device() {
-    if (!m_mame_device) return;
+    if (!m_mame_device) {
+        return;
+    }
 
     // Sync pulse channels
     for (int i = 0; i < 2; ++i) {
@@ -403,6 +406,18 @@ void nes_apu_device::sync_to_mame_device() {
             status |= (1 << i);
         }
     }
+
+    // Debug: Show channel enable status
+    static int debug_sync_count = 0;
+    if (debug_sync_count < 10) {
+        std::cout << "SYNC: Setting status=$" << std::hex << (int)status << std::dec
+                  << " (P0=" << (status & 1 ? '1' : '0')
+                  << " P1=" << (status & 2 ? '1' : '0')
+                  << " T=" << (status & 4 ? '1' : '0')
+                  << " N=" << (status & 8 ? '1' : '0') << ")" << std::endl;
+        debug_sync_count++;
+    }
+
     m_mame_device->write_register(0x15, status);
 }
 
@@ -808,6 +823,12 @@ bool audio_device_manager::set_control_on_device(const std::string& device_name,
 }
 
 void audio_device_manager::generate_mixed_samples(int16_t* buffer, size_t sample_count) {
+    static int mix_call_count = 0;
+    if (mix_call_count % 1000 == 0) {
+        std::cout << "MANAGER: generate_mixed_samples called " << mix_call_count << " times" << std::endl;
+    }
+    mix_call_count++;
+
     if (!m_initialized || m_devices.empty()) {
         std::memset(buffer, 0, sample_count * sizeof(int16_t));
         return;

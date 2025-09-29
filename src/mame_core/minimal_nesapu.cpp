@@ -1,6 +1,7 @@
 #include "minimal_nesapu.h"
 #include <iostream>
 #include <cstring>
+#include <cmath>
 #include <algorithm>
 
 minimal_nesapu_device::minimal_nesapu_device(minimal_machine_config* config, const char* tag, u32 clock)
@@ -67,8 +68,6 @@ void minimal_nesapu_device::write(offs_t offset, u8 data) {
         return;
     }
 
-    std::cout << "NES APU write: $" << std::hex << static_cast<int>(data)
-              << " to register $" << std::hex << offset << std::dec << std::endl;
 
     switch (offset) {
         case NES_APU_PULSE1_0:
@@ -225,8 +224,14 @@ void minimal_nesapu_device::sound_stream_update(s16* buffer, size_t samples) {
     // Clear the output buffer
     memset(buffer, 0, samples * sizeof(s16));
 
+
     // Generate audio for each enabled channel
-    if (m_pulse[0].enabled && m_pulse[0].length_counter > 0) {
+    if (m_pulse[0].enabled) { // Remove length_counter check for now
+        static int pulse_calls = 0;
+        if (pulse_calls < 5) {
+            std::cout << "Generating pulse0: freq=" << m_pulse[0].frequency << " vol=" << (int)m_pulse[0].volume << std::endl;
+            pulse_calls++;
+        }
         generate_pulse_wave(0, buffer, samples);
     }
 
@@ -238,9 +243,10 @@ void minimal_nesapu_device::sound_stream_update(s16* buffer, size_t samples) {
         generate_triangle_wave(buffer, samples);
     }
 
-    if (m_noise.enabled && m_noise.length_counter > 0) {
+    if (m_noise.enabled) { // Remove length_counter check for now
         generate_noise_wave(buffer, samples);
     }
+
 }
 
 void minimal_nesapu_device::generate_pulse_wave(int channel, s16* buffer, size_t samples) {
@@ -248,7 +254,10 @@ void minimal_nesapu_device::generate_pulse_wave(int channel, s16* buffer, size_t
 
     if (pulse.frequency == 0) return;
 
-    u32 phase_increment = (pulse.frequency * 0xFFFFFFFF) / m_sample_rate;
+    // Calculate phase increment for 8-step wave table
+    // We want 8 steps per wave period, and frequency cycles per second
+    // So: 8 * frequency steps per second, divided by sample rate
+    u32 phase_increment = ((u64)pulse.frequency * 8 * 0xFFFFFFFF) / m_sample_rate;
 
     for (size_t i = 0; i < samples; ++i) {
         u32 wave_index = (pulse.phase_accumulator >> 29) & 7;
@@ -256,10 +265,11 @@ void minimal_nesapu_device::generate_pulse_wave(int channel, s16* buffer, size_t
 
         s16 sample = 0;
         if (wave_output && pulse.volume > 0) {
-            sample = (PULSE_VOLUME_TABLE[pulse.volume] * 2048) / 15;
+            // High volume for audible output
+            sample = (PULSE_VOLUME_TABLE[pulse.volume] * 16384) / 15;
         }
 
-        buffer[i] += sample / 4; // Mix with other channels
+        buffer[i] += sample; // Full volume
         pulse.phase_accumulator += phase_increment;
     }
 }
@@ -304,10 +314,10 @@ void minimal_nesapu_device::generate_noise_wave(s16* buffer, size_t samples) {
 
         s16 sample = 0;
         if ((m_noise.shift_register & 1) && m_noise.volume > 0) {
-            sample = (PULSE_VOLUME_TABLE[m_noise.volume] * 1536) / 15;
+            sample = (PULSE_VOLUME_TABLE[m_noise.volume] * 16384) / 15; // Higher volume
         }
 
-        buffer[i] += sample / 4; // Mix with other channels
+        buffer[i] += sample; // Full volume for audibility
     }
 }
 

@@ -1146,7 +1146,7 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         audio_stream::config export_config;
         export_config.sample_rate = sample_rate;
         export_config.buffer_size = 1024;
-        export_config.enable_threading = false; // Synchronous for export
+        export_config.enable_threading = true;  // Need threading for audio callback
 
         auto export_stream = audio_stream_factory::create_stream(
             audio_stream_factory::backend_type::FILE_OUTPUT,
@@ -1166,8 +1166,7 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             this->audio_callback(buffer, frames);
         });
 
-        // Note: We don't set the audio manager for export streams since they
-        // use file output mode and don't need the full audio device management
+        // The export stream will use the replaced main stream which has the audio manager
 
         // Initialize the export stream
         if (!export_stream->initialize()) {
@@ -1189,12 +1188,21 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             }
         }
 
-        // Convert ticks to seconds (assuming 480 ticks per quarter note, 120 BPM)
-        double duration_seconds = static_cast<double>(estimated_duration) / (480.0 * 2.0);
+        // Convert ticks to seconds using the sequencer's timing information
+        // The sequencer uses 480 ticks per quarter note by default
+        // Use 120 BPM default tempo (2 beats per second)
+        double ticks_per_second = (480.0 * 120.0) / 60.0; // 960 ticks per second
+        double duration_seconds = static_cast<double>(estimated_duration) / ticks_per_second;
 
-        // Ensure minimum duration of 1 second
-        if (duration_seconds < 1.0) {
-            duration_seconds = 1.0;
+        // Add a small buffer for completion
+        duration_seconds += 2.0;
+
+        // Ensure reasonable bounds
+        if (duration_seconds < 5.0) {
+            duration_seconds = 5.0;  // Minimum 5 seconds for short tracks
+        }
+        if (duration_seconds > 1200.0) {  // Cap at 20 minutes for safety
+            duration_seconds = 1200.0;
         }
 
         // Start export playback

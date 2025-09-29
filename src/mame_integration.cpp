@@ -1,6 +1,7 @@
 #include "mame_integration.h"
 #include <iostream>
 #include <cstring>
+#include <fstream>
 
 // Include minimal MAME core implementation
 #include "mame_core/mame_minimal.h"
@@ -259,6 +260,74 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
 
     // Generate audio using the real minimal MAME NES APU device
     m_nes_apu_device->sound_stream_update(buffer, sample_count);
+
+    // Debug: Dump audio to WAV file (DISABLED for export testing)
+    #ifdef ENABLE_DEBUG_WAV_OUTPUT
+    static std::ofstream* wav_file = nullptr;
+    static bool wav_header_written = false;
+    static int total_samples = 0;
+
+    if (!wav_file) {
+        std::cout << "WAV: Creating debug_output.wav file" << std::endl;
+        wav_file = new std::ofstream("debug_output.wav", std::ios::binary);
+
+        // Write WAV header
+        struct {
+            char riff[4] = {'R', 'I', 'F', 'F'};
+            uint32_t fileSize = 0; // Will update later
+            char wave[4] = {'W', 'A', 'V', 'E'};
+            char fmt[4] = {'f', 'm', 't', ' '};
+            uint32_t fmtSize = 16;
+            uint16_t audioFormat = 1;
+            uint16_t numChannels = 1;
+            uint32_t sampleRate = 44100;
+            uint32_t byteRate = 44100 * 1 * 16 / 8;
+            uint16_t blockAlign = 1 * 16 / 8;
+            uint16_t bitsPerSample = 16;
+            char data[4] = {'d', 'a', 't', 'a'};
+            uint32_t dataSize = 0; // Will update later
+        } header;
+
+        wav_file->write(reinterpret_cast<char*>(&header), sizeof(header));
+        wav_header_written = true;
+    }
+
+    // Write audio samples
+    wav_file->write(reinterpret_cast<char*>(buffer), sample_count * sizeof(int16_t));
+    wav_file->flush(); // Ensure data is written immediately
+    total_samples += sample_count;
+
+    // Debug: Check if we have non-zero samples
+    static bool found_audio = false;
+    if (!found_audio) {
+        for (size_t i = 0; i < sample_count; ++i) {
+            if (buffer[i] != 0) {
+                std::cout << "WAV: Found non-zero audio sample: " << buffer[i] << " at position " << i << std::endl;
+                found_audio = true;
+                break;
+            }
+        }
+    }
+
+    // Close after 5 seconds
+    if (total_samples > 44100 * 5) {
+        if (wav_file) {
+            // Update header with actual sizes
+            wav_file->seekp(4);
+            uint32_t fileSize = 36 + total_samples * 2;
+            wav_file->write(reinterpret_cast<char*>(&fileSize), 4);
+
+            wav_file->seekp(40);
+            uint32_t dataSize = total_samples * 2;
+            wav_file->write(reinterpret_cast<char*>(&dataSize), 4);
+
+            wav_file->close();
+            delete wav_file;
+            wav_file = nullptr;
+            std::cout << "Wrote debug_output.wav with " << total_samples << " samples" << std::endl;
+        }
+    }
+    #endif // ENABLE_DEBUG_WAV_OUTPUT
 }
 
 uint32_t mame_nes_apu_device::get_sample_rate() const {

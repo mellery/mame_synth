@@ -29,6 +29,7 @@ set(TEST_SOURCES
     test_nes_sequencer.cpp
     test_nes_playback_engine.cpp
     test_end_to_end_integration.cpp
+    test_midi_wav_validation.cpp
 )
 
 # Source files to test (exclude main.cpp)

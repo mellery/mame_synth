@@ -45,6 +45,7 @@ nes_cli::command_result nes_cli::run(int argc, char* argv[]) {
     }
 
     // Handle global options first
+    std::string output_file = "";
     auto it = args.begin();
     while (it != args.end()) {
         if (*it == "--help" || *it == "-h") {
@@ -62,6 +63,14 @@ nes_cli::command_result nes_cli::run(int argc, char* argv[]) {
         } else if (*it == "--interactive" || *it == "-i") {
             args.erase(it);
             return run_interactive();
+        } else if (*it == "-o" || *it == "--output") {
+            it = args.erase(it);
+            if (it != args.end()) {
+                output_file = *it;
+                it = args.erase(it);
+            } else {
+                return {false, "Missing filename for -o option", 1};
+            }
         } else {
             ++it;
         }
@@ -107,18 +116,38 @@ nes_cli::command_result nes_cli::run(int argc, char* argv[]) {
             return load_result;
         }
 
-        // If load was successful, start playback
+        // If -o option was specified, export to WAV file instead of interactive playbook
+        if (!output_file.empty()) {
+            // Use export_to_wav directly instead of trying to configure playbook
+            if (!m_engine || m_engine->get_state() == nes_playback_engine::engine_state::UNINITIALIZED) {
+                return {false, "No file loaded for export", 1};
+            }
+
+            // Export directly to the specified WAV file
+            try {
+                if (m_engine->export_to_wav(output_file)) {
+                    std::cout << "Successfully exported to: " << output_file << std::endl;
+                    return {true, "File exported successfully", 0};
+                } else {
+                    return {false, "Failed to export to: " + output_file, 1};
+                }
+            } catch (const std::exception& e) {
+                return {false, "Export error: " + std::string(e.what()), 1};
+            }
+        }
+
+        // If load was successful, start playback (interactive mode)
         std::vector<std::string> play_args;
         auto play_result = cmd_play(play_args);
         if (!play_result.success) {
             return play_result;
         }
 
-        // Keep the program running to allow audio playback
+        // Keep the program running to allow audio playbook
         std::cout << "\nPlayback started. Press Enter to stop...\n";
         std::cin.get();
 
-        // Stop playback when user presses Enter
+        // Stop playbook when user presses Enter
         std::vector<std::string> stop_args;
         return cmd_stop(stop_args);
     }
@@ -490,10 +519,12 @@ void nes_cli::print_usage() const {
     std::cout << "  -h, --help        Show this help message\n";
     std::cout << "  -v, --version     Show version information\n";
     std::cout << "  -i, --interactive Enter interactive mode\n";
+    std::cout << "  -o, --output      Export to WAV file (use with file input)\n";
     std::cout << "  -q, --quiet       Suppress output messages\n";
     std::cout << "  --verbose         Show detailed output\n\n";
     std::cout << "Direct File Playback:\n";
-    std::cout << "  <file.mid>        Load and play a music file directly\n\n";
+    std::cout << "  <file.mid>        Load and play a music file directly\n";
+    std::cout << "  <file.mid> -o <output.wav>  Convert MIDI to WAV file\n\n";
     std::cout << "Common Commands:\n";
     std::cout << "  load <file>       Load and play a music file\n";
     std::cout << "  validate <file>   Validate a music file\n";

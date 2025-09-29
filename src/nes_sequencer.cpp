@@ -232,8 +232,9 @@ bool nes_sequencer::play() {
 }
 
 bool nes_sequencer::play_from_time(music_time_t start_time) {
+
     if (!m_initialized || m_music_data.notes().empty()) {
-        std::cout << "Cannot play: no music data loaded" << std::endl;
+        std::cout << "Cannot play: no music data loaded (initialized=" << m_initialized << ", notes=" << m_music_data.notes().size() << ")" << std::endl;
         return false;
     }
 
@@ -242,12 +243,16 @@ bool nes_sequencer::play_from_time(music_time_t start_time) {
 
     // Set playback parameters
     m_current_tick = start_time;
-    m_playback_start_time = std::chrono::steady_clock::now();
+    // Set playback start time slightly in the future to ensure proper timing
+    m_playback_start_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
     m_playback_state = playback_state::PLAYING;
 
     // Schedule initial events
     schedule_events_for_time(start_time, (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
                            (m_microseconds_per_quarter.load() / 1000));
+
+    // Wake up the sequencer thread to start processing events
+    m_thread_condition.notify_one();
 
     std::cout << "NES sequencer playback started from tick " << start_time << std::endl;
     return true;
@@ -406,99 +411,70 @@ nes_sequencer::sequencer_stats nes_sequencer::get_stats() const {
 // Private Implementation Methods
 
 void nes_sequencer::sequencer_thread_proc() {
-    std::cout << "DEBUG: NES sequencer thread started" << std::endl;
 
     while (m_thread_running) {
-        std::cout << "DEBUG: Thread loop iteration, m_thread_running=" << m_thread_running << std::endl;
-
         if (m_playback_state == playback_state::PLAYING && m_thread_running) {
-            std::cout << "DEBUG: Processing events in playing state" << std::endl;
             process_events();
 
             // Check exit condition again after processing
             if (!m_thread_running) {
-                std::cout << "DEBUG: Exit condition detected after process_events" << std::endl;
                 break;
             }
 
-            std::cout << "DEBUG: Updating stats" << std::endl;
             update_stats();
         }
 
         // Check exit condition before sleeping
         if (!m_thread_running) {
-            std::cout << "DEBUG: Exit condition detected before sleep" << std::endl;
             break;
         }
 
         // Sleep for a short time to avoid busy waiting
-        std::cout << "DEBUG: About to wait on condition variable" << std::endl;
         std::unique_lock<std::mutex> lock(m_thread_mutex);
-        m_thread_condition.wait_for(lock, std::chrono::milliseconds(1), [this] { return !m_thread_running; });
-        std::cout << "DEBUG: Woke up from condition variable wait" << std::endl;
+        m_thread_condition.wait_for(lock, std::chrono::milliseconds(1), [this] {
+            return !m_thread_running || m_playback_state == playback_state::PLAYING;
+        });
     }
 
-    std::cout << "DEBUG: NES sequencer thread finished" << std::endl;
 }
 
 void nes_sequencer::process_events() {
-    std::cout << "DEBUG: Entering process_events" << std::endl;
-
     // Check if we should exit early
     if (!m_thread_running) {
-        std::cout << "DEBUG: Early exit from process_events - thread not running" << std::endl;
         return;
     }
-
-    std::cout << "DEBUG: Getting current time" << std::endl;
     auto current_time = std::chrono::steady_clock::now();
     music_time_t current_tick = real_time_to_tick(current_time);
 
     // Update current position
     m_current_tick = current_tick;
 
-    std::cout << "DEBUG: Processing note-offs" << std::endl;
     // Process note-offs for expired notes
     process_note_offs();
 
     // Check exit condition again
     if (!m_thread_running) {
-        std::cout << "DEBUG: Exit from process_events after note-offs - thread not running" << std::endl;
         return;
     }
-
-    std::cout << "DEBUG: About to acquire event queue lock" << std::endl;
     // Process scheduled events
     std::lock_guard<std::mutex> lock(m_event_queue_mutex);
-    std::cout << "DEBUG: Acquired event queue lock" << std::endl;
-
-    std::cout << "DEBUG: Entering event processing while loop" << std::endl;
     while (!m_event_queue.empty() && m_event_queue.top().scheduled_time <= current_time && m_thread_running) {
-        std::cout << "DEBUG: Processing event from queue" << std::endl;
         auto event = m_event_queue.top();
         m_event_queue.pop();
 
-        std::cout << "DEBUG: About to process event" << std::endl;
         process_event(event);
-        std::cout << "DEBUG: About to track event latency" << std::endl;
         track_event_latency(event);
-        std::cout << "DEBUG: Event processed, checking loop condition" << std::endl;
     }
-    std::cout << "DEBUG: Exited event processing while loop" << std::endl;
-
     // Schedule more events if needed
-    std::cout << "DEBUG: About to schedule events for time" << std::endl;
     auto lookahead_ticks = (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
                           (m_microseconds_per_quarter.load() / 1000);
     schedule_events_for_time(current_tick, lookahead_ticks);
-    std::cout << "DEBUG: Finished scheduling events" << std::endl;
 
     // Check for loop condition
     if (m_loop_enabled && current_tick >= m_loop_end) {
         std::cout << "Loop point reached, returning to " << m_loop_start << std::endl;
         set_position(m_loop_start);
     }
-    std::cout << "DEBUG: Exiting process_events" << std::endl;
 }
 
 void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_time_t lookahead_ticks) {
@@ -632,8 +608,47 @@ void nes_sequencer::generate_events_from_music_data() {
         m_event_queue.pop();
     }
 
-    // Note: music_data doesn't store ticks_per_quarter_note,
-    // so we'll use the sequencer's configured value
+    // Generate note events from music data
+    for (const auto& note : m_music_data.notes()) {
+        // Only add if channel is enabled and not muted
+        if (is_channel_enabled(note.channel) && !is_channel_muted(note.channel)) {
+            // Create note on event using the static constructor
+            auto note_on = sequencer_event::note_on(
+                tick_to_real_time(note.start), note.start,
+                map_midi_to_nes_channel(note.channel), note.note, note.velocity, note.duration
+            );
+            m_event_queue.push(note_on);
+
+            // Create note off event using the static constructor
+            auto note_off = sequencer_event::note_off(
+                tick_to_real_time(note.start + note.duration), note.start + note.duration,
+                map_midi_to_nes_channel(note.channel), note.note
+            );
+            m_event_queue.push(note_off);
+        }
+    }
+
+    // Generate control events
+    for (const auto& control : m_music_data.controls()) {
+        if (is_channel_enabled(control.channel) && !is_channel_muted(control.channel)) {
+            auto ctrl_event = sequencer_event::control_change(
+                tick_to_real_time(control.time), control.time,
+                map_midi_to_nes_channel(control.channel), control.controller, control.value
+            );
+            m_event_queue.push(ctrl_event);
+        }
+    }
+
+    // Generate program change events
+    for (const auto& program : m_music_data.programs()) {
+        if (is_channel_enabled(program.channel) && !is_channel_muted(program.channel)) {
+            auto prog_event = sequencer_event::program_change(
+                tick_to_real_time(program.time), program.time,
+                map_midi_to_nes_channel(program.channel), program.program
+            );
+            m_event_queue.push(prog_event);
+        }
+    }
 
     std::cout << "Generated events from music data with " << m_config.ticks_per_quarter_note
               << " ticks per quarter note" << std::endl;
