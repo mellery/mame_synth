@@ -1,4 +1,5 @@
 #include "mame_integration.h"
+#include "debug_config.h"
 #include <iostream>
 #include <cstring>
 #include <fstream>
@@ -226,6 +227,20 @@ void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
 
     std::cout << "MAME NES APU: Writing $" << std::hex << static_cast<int>(value)
               << " to register $" << std::hex << offset << std::dec << std::endl;
+
+    // Debug logging for register writes
+    if (g_debug_config.log_register_writes) {
+        const char* reg_names[] = {
+            "SQ1_VOL", "SQ1_SWEEP", "SQ1_LO", "SQ1_HI",      // $4000-$4003
+            "SQ2_VOL", "SQ2_SWEEP", "SQ2_LO", "SQ2_HI",      // $4004-$4007
+            "TRI_LINEAR", "unused", "TRI_LO", "TRI_HI",      // $4008-$400B
+            "NOISE_VOL", "unused", "NOISE_LO", "NOISE_HI",   // $400C-$400F
+            "DMC_FREQ", "DMC_RAW", "DMC_START", "DMC_LEN",   // $4010-$4013
+            "unused", "SND_CHN", "unused", "FRAME_CNT"       // $4014-$4017
+        };
+        std::string desc = (offset <= 0x17) ? reg_names[offset] : "UNKNOWN";
+        DEBUG_LOG_REGISTER(offset, value, desc);
+    }
 
     // Write to the real minimal MAME NES APU device
     m_nes_apu_device->write(offset, value);

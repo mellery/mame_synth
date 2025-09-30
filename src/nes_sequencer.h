@@ -102,6 +102,7 @@ public:
         bool enable_looping;                // Enable automatic looping
         bool enable_threading;              // Use separate thread for sequencing
         uint32_t lookahead_ms;              // Event scheduling lookahead time
+        bool offline_rendering;             // Use sample-based time instead of wall-clock time
 
         sequencer_config()
             : sample_rate(44100)
@@ -109,7 +110,8 @@ public:
             , microseconds_per_quarter(500000)  // 120 BPM
             , enable_looping(false)
             , enable_threading(true)
-            , lookahead_ms(100) {}
+            , lookahead_ms(100)
+            , offline_rendering(false) {}
     };
 
     // Playback state
@@ -145,6 +147,10 @@ public:
     void set_position(music_time_t time);
     music_time_t get_position() const;
     music_time_t get_total_duration() const;
+
+    // Offline rendering support
+    void set_offline_rendering(bool enabled);    // Enable sample-based timing instead of wall-clock
+    void advance_samples(uint32_t num_samples);  // Advance sample counter for offline mode
 
     void set_tempo_scale(double scale); // 1.0 = normal, 2.0 = double speed, 0.5 = half speed
     double get_tempo_scale() const { return m_tempo_scale; }
@@ -211,6 +217,9 @@ private:
     sequencer_time_t m_pause_time;
     music_time_t m_pause_tick = 0;
 
+    // Offline rendering support
+    std::atomic<uint64_t> m_sample_count{0};  // Total samples rendered (for offline mode)
+
     // Looping
     bool m_loop_enabled = false;
     music_time_t m_loop_start = 0;
@@ -219,6 +228,7 @@ private:
     // Event scheduling
     std::priority_queue<sequencer_event, std::vector<sequencer_event>, std::greater<sequencer_event>> m_event_queue;
     std::mutex m_event_queue_mutex;
+    music_time_t m_last_scheduled_tick = 0;  // Track last scheduled tick to avoid re-scheduling
 
     // Active notes tracking (for note-off events)
     struct active_note {

@@ -51,6 +51,7 @@ set(LIB_SOURCES
     ../src/nes_channel_assignment.cpp
     ../src/nes_cli.cpp
     ../src/nes_channel_assignment_cli.cpp
+    ../src/debug_config.cpp
 )
 
 # Create test executable
@@ -74,6 +75,7 @@ add_executable(mame_integration_tests
     ../src/music_parser.cpp
     ../src/nes_config.cpp
     ../src/register_mapping.cpp
+    ../src/debug_config.cpp
 )
 
 # Link audio libraries to tests as well

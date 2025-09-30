@@ -1,5 +1,6 @@
 #include "audio_stream.h"
 #include "audio_device.h"
+#include "debug_config.h"
 #include <iostream>
 #include <chrono>
 #include <algorithm>
@@ -148,6 +149,11 @@ void audio_stream::set_callback(audio_callback_t callback) {
     m_callback = callback;
 }
 
+void audio_stream::set_post_process_callback(post_process_callback_t callback) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_post_process_callback = callback;
+}
+
 void audio_stream::set_audio_manager(audio_device_manager* manager) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_audio_manager = manager;
@@ -188,6 +194,11 @@ void audio_stream::audio_thread_proc() {
         // Process audio
         process_audio_buffer(buffer.data(), m_config.buffer_size);
 
+        // Call post-process callback (for offline rendering sample counting)
+        if (m_post_process_callback) {
+            m_post_process_callback(m_config.buffer_size);
+        }
+
         // Check exit condition after processing
         if (!m_running) break;
 
@@ -214,12 +225,20 @@ void audio_stream::audio_thread_proc() {
         // Update statistics
         update_stats();
 
-        // Sleep until next buffer time, but check for exit condition
-        next_time += buffer_duration;
-
-        // Use condition variable with timeout for responsive shutdown
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_condition.wait_until(lock, next_time, [this] { return !m_running; });
+        // Timing: real-time audio needs precise sleep, file output can run fast
+        if (!m_file_output_mode) {
+            // Real-time audio: sleep to maintain timing
+            next_time += buffer_duration;
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_condition.wait_until(lock, next_time, [this] { return !m_running; });
+        } else {
+            // File output: sample counting handles timing, run as fast as possible
+            // Just check for stop signal with minimal delay
+            std::unique_lock<std::mutex> lock(m_mutex);
+            if (m_condition.wait_for(lock, std::chrono::microseconds(10), [this] { return !m_running; })) {
+                break;
+            }
+        }
     }
 
     std::cout << "Audio thread finished" << std::endl;
@@ -363,6 +382,26 @@ void audio_stream::shutdown_file_output() {
 
 void audio_stream::write_frames_to_file(const int16_t* buffer, size_t frames) {
     if (m_file_writer) {
+        if (g_debug_config.log_audio_buffers) {
+            // Check if buffer contains non-silent audio
+            bool has_audio = false;
+            for (size_t i = 0; i < frames && !has_audio; ++i) {
+                if (buffer[i] != 0) has_audio = true;
+            }
+
+            static size_t total_frames = 0;
+            static size_t non_silent_frames = 0;
+            total_frames += frames;
+            if (has_audio) non_silent_frames += frames;
+
+            if (total_frames % 48000 == 0) { // Log every second at 48kHz
+                std::stringstream ss;
+                ss << "WAV write: total=" << total_frames
+                   << ", non_silent=" << non_silent_frames
+                   << " (" << (100.0 * non_silent_frames / total_frames) << "%)";
+                DEBUG_LOG_AUDIO(ss.str());
+            }
+        }
         m_file_writer->write_frames(buffer, frames);
     }
 }
@@ -388,7 +427,23 @@ audio_file_writer::~audio_file_writer() {
 bool audio_file_writer::write_frames(const int16_t* buffer, size_t frames) {
     if (!m_file) return false;
 
+    if (g_debug_config.log_file_operations) {
+        long pos_before = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "Writing " << frames << " frames at file position " << pos_before;
+        DEBUG_LOG_INFO("WAV_IO", ss.str());
+    }
+
     size_t written = std::fwrite(buffer, sizeof(int16_t), frames, m_file.get());
+
+    if (g_debug_config.log_file_operations) {
+        long pos_after = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "Wrote " << written << " frames, position now " << pos_after
+           << ", total frames: " << (m_frames_written + written);
+        DEBUG_LOG_INFO("WAV_IO", ss.str());
+    }
+
     if (written == frames) {
         m_frames_written += frames;
         return true;
@@ -406,6 +461,16 @@ void audio_file_writer::close() {
 
 void audio_file_writer::write_wav_header() {
     if (!m_file) return;
+
+    long pos_before = std::ftell(m_file.get());
+
+    if (g_debug_config.log_wav_export) {
+        std::stringstream ss;
+        ss << "Writing initial WAV header: file=" << m_filename
+           << ", sample_rate=" << m_sample_rate
+           << ", file_pos=" << pos_before;
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
 
     // WAV header (will be updated later with correct sizes)
     uint8_t header[44] = {
@@ -451,6 +516,13 @@ void audio_file_writer::write_wav_header() {
     header[43] = 0;
 
     std::fwrite(header, 1, 44, m_file.get());
+
+    if (g_debug_config.log_wav_export) {
+        long pos_after = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "WAV header written, file position now: " << pos_after;
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
 }
 
 void audio_file_writer::update_wav_header() {
@@ -459,13 +531,60 @@ void audio_file_writer::update_wav_header() {
     uint32_t data_size = m_frames_written * sizeof(int16_t);
     uint32_t file_size = data_size + 36;
 
-    // Update file size
-    std::fseek(m_file.get(), 4, SEEK_SET);
-    std::fwrite(&file_size, 4, 1, m_file.get());
+    if (g_debug_config.log_wav_export) {
+        double duration_sec = static_cast<double>(m_frames_written) / m_sample_rate;
+        long current_pos = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "Updating WAV header: frames=" << m_frames_written
+           << ", duration=" << duration_sec << "s"
+           << ", data_size=" << data_size << " bytes"
+           << ", file_size=" << file_size << " bytes"
+           << ", current_file_pos=" << current_pos;
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
 
-    // Update data size
-    std::fseek(m_file.get(), 40, SEEK_SET);
-    std::fwrite(&data_size, 4, 1, m_file.get());
+    // Update file size (at offset 4)
+    int seek_result1 = std::fseek(m_file.get(), 4, SEEK_SET);
+    if (g_debug_config.log_wav_export) {
+        long pos = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "Seeking to offset 4 (file_size), seek_result=" << seek_result1
+           << ", position=" << pos;
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
+
+    size_t written1 = std::fwrite(&file_size, 4, 1, m_file.get());
+    if (g_debug_config.log_wav_export) {
+        std::stringstream ss;
+        ss << "Wrote file_size (" << file_size << "), bytes_written=" << (written1 * 4);
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
+
+    // Update data size (at offset 40)
+    int seek_result2 = std::fseek(m_file.get(), 40, SEEK_SET);
+    if (g_debug_config.log_wav_export) {
+        long pos = std::ftell(m_file.get());
+        std::stringstream ss;
+        ss << "Seeking to offset 40 (data_size), seek_result=" << seek_result2
+           << ", position=" << pos;
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
+
+    size_t written2 = std::fwrite(&data_size, 4, 1, m_file.get());
+    if (g_debug_config.log_wav_export) {
+        std::stringstream ss;
+        ss << "Wrote data_size (" << data_size << "), bytes_written=" << (written2 * 4);
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
+
+    // Flush to ensure data is written
+    std::fflush(m_file.get());
+
+    if (g_debug_config.log_wav_export) {
+        std::stringstream ss;
+        ss << "WAV header update complete, file flushed";
+        DEBUG_LOG_INFO("WAV", ss.str());
+    }
 }
 
 // Audio stream factory

@@ -89,6 +89,10 @@ public:
     // Command registration (for extensibility)
     void register_command(const std::string& name, command_func_t func, const std::string& description);
 
+    // Initialization (can be called explicitly for testing)
+    bool initialize();
+    void shutdown();
+
 private:
     cli_config m_config;
     nes_config::nes_configuration m_nes_config;
@@ -103,8 +107,6 @@ private:
     bool m_initialized = false;
 
     // Internal methods
-    bool initialize();
-    void shutdown();
     void register_builtin_commands();
     std::vector<std::string> parse_command_line(const std::string& cmd_line);
     void print_usage() const;

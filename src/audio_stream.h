@@ -22,6 +22,7 @@ class audio_device_manager;
 class audio_stream {
 public:
     using audio_callback_t = std::function<void(int16_t* buffer, size_t frames)>;
+    using post_process_callback_t = std::function<void(size_t frames)>;  // Called after buffer processing
 
     struct config {
         uint32_t sample_rate;
@@ -43,6 +44,7 @@ public:
 
     // Audio source management
     void set_callback(audio_callback_t callback);
+    void set_post_process_callback(post_process_callback_t callback);  // For offline rendering sample counting
     void set_audio_manager(audio_device_manager* manager);
 
     // File output configuration (must be called before initialize for FILE_OUTPUT backend)
@@ -66,6 +68,7 @@ public:
 private:
     config m_config;
     audio_callback_t m_callback;
+    post_process_callback_t m_post_process_callback;
     audio_device_manager* m_audio_manager = nullptr;
 
     // Threading

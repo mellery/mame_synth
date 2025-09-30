@@ -45,7 +45,13 @@ enhanced_midi_parser::enhanced_midi_parser() = default;
 enhanced_midi_parser::~enhanced_midi_parser() = default;
 
 bool enhanced_midi_parser::parse_file_enhanced(const std::string& filename, music_data& output, enhanced_music_metadata& metadata) {
-    // Read file
+    // Use base midi_parser for accurate note parsing (handles note-on/note-off pairs correctly)
+    midi_parser base_parser;
+    if (!base_parser.parse_file(filename, output)) {
+        return false;
+    }
+
+    // Read file for metadata extraction
     std::ifstream file(filename, std::ios::binary);
     if (!file.is_open()) {
         return false;
@@ -61,7 +67,7 @@ bool enhanced_midi_parser::parse_file_enhanced(const std::string& filename, musi
     file.read(reinterpret_cast<char*>(data.data()), file_size);
     file.close();
 
-    // Parse MIDI header
+    // Parse MIDI header for metadata
     midi_header_info header;
     if (!parse_midi_header(data, header)) {
         return false;
@@ -76,11 +82,10 @@ bool enhanced_midi_parser::parse_file_enhanced(const std::string& filename, musi
     metadata.creation_time = file_support_utils::get_file_modification_time(filename);
     metadata.modification_time = metadata.creation_time;
 
-    // Parse tracks
+    // Parse tracks for metadata (not notes - those are already parsed by base_parser)
     std::vector<midi_track_info> track_infos;
     const uint8_t* current_data = data.data() + 14; // Skip header
     size_t remaining_data = data.size() - 14;
-    music_time_t global_time = 0;
 
     for (uint16_t track = 0; track < header.track_count && remaining_data > 8; ++track) {
         // Check track header
@@ -100,20 +105,21 @@ bool enhanced_midi_parser::parse_file_enhanced(const std::string& filename, musi
             break;
         }
 
-        // Parse track
+        // Simple track metadata (event count, channel mask)
         midi_track_info track_info;
-        music_time_t track_time = global_time;
-        if (parse_midi_track(current_data, track_length, output, track_info, track_time)) {
-            track_infos.push_back(track_info);
-        }
+        track_info.event_count = 0;
+        track_info.channel_mask = 0;
+        // Could parse track for detailed metadata, but notes are already correctly parsed
+        track_infos.push_back(track_info);
 
         current_data += track_length;
         remaining_data -= track_length;
-        global_time = std::max(global_time, track_time);
     }
 
     // Extract metadata from tracks
     extract_midi_metadata(track_infos, header, metadata);
+
+    // Music data's metadata is already correct from base_parser (preserves TPQN)
 
     // Analyze NES compatibility
     analyze_nes_compatibility(output, metadata);

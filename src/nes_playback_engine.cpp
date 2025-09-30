@@ -3,6 +3,8 @@
 #include "audio_device.h"
 #include "music_parser.h"
 #include "comprehensive_file_support.h"
+#include "nes_channel_assignment.h"
+#include "debug_config.h"
 #include <iostream>
 #include <fstream>
 #include <algorithm>
@@ -336,6 +338,10 @@ bool nes_playback_engine::load_file_enhanced(const std::string& filename) {
             return false;
         }
 
+        // DEBUG: Check TPQN after file manager load
+        std::cout << "DEBUG: After file manager load, music_data TPQN = "
+                  << m_current_music.metadata().ticks_per_quarter << std::endl;
+
         // Store enhanced metadata
         m_current_metadata = metadata;
         m_current_filename = filename;
@@ -363,6 +369,59 @@ bool nes_playback_engine::load_file_enhanced(const std::string& filename) {
             handle_error("Failed to load music into sequencer");
             m_state = engine_state::ERROR;
             return false;
+        }
+
+        // Apply intelligent channel assignment for NES
+        std::cout << "Applying NES channel assignment..." << std::endl;
+        try {
+            nes_channel_assignment::channel_assignment_engine assignment_engine;
+            assignment_engine.set_active_strategy("quality_focused"); // Use quality-focused strategy by default
+            auto assignment_result = assignment_engine.assign_channels(m_current_music);
+
+            // Convert assignment result to sequencer channel mapping format
+            std::vector<nes_sequencer::nes_channel_mapping> sequencer_mapping;
+            sequencer_mapping.resize(16); // All 16 MIDI channels
+
+            // Initialize with default identity mapping
+            for (int i = 0; i < 16; ++i) {
+                sequencer_mapping[i].midi_channel = i;
+                sequencer_mapping[i].nes_channel = std::min(i, 4); // Default to DMC for high channels
+                sequencer_mapping[i].enabled = true;
+            }
+
+            // Apply intelligent assignments from the engine
+            for (const auto& assignment : assignment_result.assignments) {
+                if (assignment.midi_channel < 16) {
+                    sequencer_mapping[assignment.midi_channel].nes_channel = static_cast<uint8_t>(assignment.nes_channel);
+
+                    // Convert NES channel type to string for display
+                    const char* nes_channel_name = "Unknown";
+                    switch (assignment.nes_channel) {
+                        case nes_channel_assignment::nes_channel_type::PULSE_1: nes_channel_name = "Pulse1"; break;
+                        case nes_channel_assignment::nes_channel_type::PULSE_2: nes_channel_name = "Pulse2"; break;
+                        case nes_channel_assignment::nes_channel_type::TRIANGLE: nes_channel_name = "Triangle"; break;
+                        case nes_channel_assignment::nes_channel_type::NOISE: nes_channel_name = "Noise"; break;
+                        case nes_channel_assignment::nes_channel_type::DMC: nes_channel_name = "DMC"; break;
+                    }
+
+                    std::cout << "  MIDI ch" << static_cast<int>(assignment.midi_channel)
+                              << " -> NES " << nes_channel_name
+                              << " (confidence: " << (assignment.confidence_score * 100.0f) << "%)" << std::endl;
+                }
+            }
+
+            // Apply the mapping to the sequencer
+            m_sequencer->set_channel_mapping(sequencer_mapping);
+
+            std::cout << "Channel assignment complete (quality: "
+                      << (assignment_result.overall_quality_score * 100.0f) << "%)" << std::endl;
+
+            // Show warnings if any
+            for (const auto& warning : assignment_result.warnings) {
+                std::cout << "  ⚠ " << warning << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "⚠ Channel assignment failed: " << e.what() << ", using default mapping" << std::endl;
         }
 
         // Update info from enhanced metadata
@@ -1118,7 +1177,68 @@ void nes_playback_engine::set_noise_mode(bool short_mode) {
     }
 }
 
+// Calculate duration accounting for tempo changes
+double nes_playback_engine::calculate_tempo_aware_duration() const {
+    if (!m_sequencer) {
+        return 0.0;
+    }
+
+    // Find the latest note/event end time in ticks
+    music_time_t total_ticks = 0;
+    for (const auto& note : m_current_music.notes()) {
+        music_time_t note_end = note.start + note.duration;
+        total_ticks = std::max(total_ticks, note.start + note.duration);
+    }
+
+    // If no notes, return 0
+    if (total_ticks == 0) {
+        return 0.0;
+    }
+
+    // Get tempo events and sort them by time
+    auto tempos = m_current_music.tempos();
+    std::sort(tempos.begin(), tempos.end(),
+              [](const music_tempo& a, const music_tempo& b) { return a.time < b.time; });
+
+    // Calculate duration segment by segment
+    double duration_seconds = 0.0;
+    music_time_t current_tick = 0;
+    uint32_t current_tempo_uspq = 500000; // Default: 500000 microseconds per quarter note (120 BPM)
+
+    // Get ticks per quarter note from the music data's metadata (NOT config)
+    uint32_t ticks_per_quarter = m_current_music.metadata().ticks_per_quarter;
+
+    // Process each tempo segment
+    for (size_t i = 0; i <= tempos.size(); ++i) {
+        music_time_t segment_end = (i < tempos.size()) ? tempos[i].time : total_ticks;
+        music_time_t segment_ticks = segment_end - current_tick;
+
+        if (segment_ticks > 0) {
+            // Calculate duration for this segment: (ticks / ticks_per_quarter) * (microseconds_per_quarter / 1000000)
+            double microseconds_per_tick = static_cast<double>(current_tempo_uspq) / ticks_per_quarter;
+            double segment_duration = (segment_ticks * microseconds_per_tick) / 1000000.0;
+            duration_seconds += segment_duration;
+        }
+
+        // Update for next segment
+        if (i < tempos.size()) {
+            current_tempo_uspq = tempos[i].microseconds_per_quarter;
+            current_tick = tempos[i].time;
+        }
+    }
+
+    return duration_seconds;
+}
+
 bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sample_rate) {
+    if (g_debug_config.log_export_process) {
+        std::stringstream ss;
+        ss << "WAV export started: file=" << filename
+           << ", sample_rate=" << sample_rate
+           << ", notes=" << m_current_music.notes().size();
+        DEBUG_LOG_INFO("EXPORT", ss.str());
+    }
+
     // Validate input parameters
     if (filename.empty()) {
         return false;
@@ -1129,6 +1249,9 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         m_current_music.controls().empty() &&
         m_current_music.programs().empty() &&
         m_current_music.tempos().empty()) {
+        if (g_debug_config.log_export_process) {
+            DEBUG_LOG_ERROR("EXPORT", "No music data loaded for export");
+        }
         return false;
     }
 
@@ -1161,9 +1284,21 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Set the output filename
         export_stream->set_output_filename(filename);
 
+        // Enable offline rendering mode in sequencer for faster-than-realtime export
+        if (m_sequencer) {
+            m_sequencer->set_offline_rendering(true);
+        }
+
         // Set up the audio callback for export
         export_stream->set_callback([this](int16_t* buffer, size_t frames) {
             this->audio_callback(buffer, frames);
+        });
+
+        // Set up post-process callback to advance sample count for offline timing
+        export_stream->set_post_process_callback([this](size_t frames) {
+            if (m_sequencer) {
+                m_sequencer->advance_samples(static_cast<uint32_t>(frames));
+            }
         });
 
         // The export stream will use the replaced main stream which has the audio manager
@@ -1178,31 +1313,38 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         auto original_stream = std::move(m_audio_stream);
         m_audio_stream = std::move(export_stream);
 
-        // Calculate approximate duration for export
-        // This is a rough estimate - in a full implementation we'd calculate exact duration
-        music_time_t estimated_duration = 0;
+        // Calculate duration with tempo awareness
+        music_time_t total_duration_ticks = 0;
         for (const auto& note : m_current_music.notes()) {
             music_time_t note_end = note.start + note.duration;
-            if (note_end > estimated_duration) {
-                estimated_duration = note_end;
+            if (note_end > total_duration_ticks) {
+                total_duration_ticks = note_end;
             }
         }
 
-        // Convert ticks to seconds using the sequencer's timing information
-        // The sequencer uses 480 ticks per quarter note by default
-        // Use 120 BPM default tempo (2 beats per second)
-        double ticks_per_second = (480.0 * 120.0) / 60.0; // 960 ticks per second
-        double duration_seconds = static_cast<double>(estimated_duration) / ticks_per_second;
+        // Use tempo-aware duration calculation
+        double duration_seconds = calculate_tempo_aware_duration();
 
-        // Add a small buffer for completion
+        // Add a small buffer for audio processing completion
         duration_seconds += 2.0;
 
         // Ensure reasonable bounds
         if (duration_seconds < 5.0) {
             duration_seconds = 5.0;  // Minimum 5 seconds for short tracks
         }
-        if (duration_seconds > 1200.0) {  // Cap at 20 minutes for safety
-            duration_seconds = 1200.0;
+        if (duration_seconds > 3600.0) {  // Cap at 1 hour for safety
+            duration_seconds = 3600.0;
+        }
+
+        std::cout << "Export: total_duration=" << total_duration_ticks << " ticks, "
+                  << "calculated_duration=" << duration_seconds << " seconds" << std::endl;
+
+        if (g_debug_config.log_export_process) {
+            std::stringstream ss;
+            ss << "Export timing: total_duration=" << total_duration_ticks << " ticks"
+               << ", calculated_duration=" << duration_seconds << " seconds"
+               << ", tempo_changes=" << m_current_music.tempos().size();
+            DEBUG_LOG_TIMING(ss.str());
         }
 
         // Start export playback
@@ -1214,26 +1356,97 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             return false;
         }
 
-        // Let the audio render for the estimated duration
-        // In a real implementation, we'd use the sequencer's position to know when we're done
+        // Wait for sequencer to complete, using both position tracking and timeout
         auto start_time = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start_time <
-               std::chrono::milliseconds(static_cast<int>(duration_seconds * 1000 + 500))) {
+        auto timeout_duration = std::chrono::milliseconds(static_cast<int>(duration_seconds * 1000 * 1.2)); // 20% safety margin
+        auto last_progress_log = start_time;
+        music_time_t last_position = 0;
 
-            // Process audio in chunks
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (g_debug_config.log_export_process) {
+            std::stringstream ss;
+            ss << "Export loop starting: target_ticks=" << total_duration_ticks
+               << ", timeout=" << (duration_seconds * 1.2) << "s";
+            DEBUG_LOG_INFO("EXPORT", ss.str());
+        }
 
-            // Check if playback naturally finished
-            if (m_state == engine_state::READY || m_state == engine_state::STOPPING) {
+        bool first_loop_iteration = true;
+        while (true) {
+            // Check if sequencer has reached the end
+            music_time_t current_position = m_sequencer ? m_sequencer->get_position() : 0;
+
+            // Debug log first iteration
+            if (first_loop_iteration && g_debug_config.log_export_process) {
+                std::stringstream ss;
+                ss << "Export loop first iteration: current_position=" << current_position
+                   << ", total_duration_ticks=" << total_duration_ticks;
+                DEBUG_LOG_INFO("EXPORT", ss.str());
+                first_loop_iteration = false;
+            }
+
+            // Progress logging every 5 seconds
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - last_progress_log).count() >= 5) {
+                double percent = total_duration_ticks > 0 ?
+                                (100.0 * current_position / total_duration_ticks) : 0.0;
+                std::cout << "Export progress: " << percent << "% "
+                          << "(" << current_position << "/" << total_duration_ticks << " ticks)" << std::endl;
+                last_progress_log = now;
+            }
+
+            // Check completion conditions
+            bool reached_end = (current_position >= total_duration_ticks);
+            bool playback_stopped = (m_state == engine_state::READY || m_state == engine_state::STOPPING);
+            bool timed_out = (std::chrono::steady_clock::now() - start_time) > timeout_duration;
+            bool position_stalled = (current_position > 0 && current_position == last_position);
+
+            if (reached_end) {
+                if (g_debug_config.log_export_process) {
+                    DEBUG_LOG_INFO("EXPORT", "Export complete: sequencer reached end");
+                }
+                // Give a small amount of time for final audio buffers to process
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 break;
             }
+
+            if (playback_stopped) {
+                if (g_debug_config.log_export_process) {
+                    DEBUG_LOG_INFO("EXPORT", "Export complete: playback stopped naturally");
+                }
+                break;
+            }
+
+            if (timed_out) {
+                if (g_debug_config.log_export_process) {
+                    DEBUG_LOG_WARNING("EXPORT", "Export timeout reached");
+                }
+                break;
+            }
+
+            last_position = current_position;
+
+            // Sleep briefly before checking again
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
         // Stop export playback
         stop();
 
+        if (g_debug_config.log_export_process) {
+            auto elapsed = std::chrono::steady_clock::now() - start_time;
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+            std::stringstream ss;
+            ss << "Export completed: elapsed=" << elapsed_ms << "ms"
+               << ", expected=" << static_cast<int>(duration_seconds * 1000) << "ms";
+            DEBUG_LOG_INFO("EXPORT", ss.str());
+        }
+
         // Shutdown export stream (this should finalize the WAV file)
         m_audio_stream->shutdown();
+
+        // Disable offline rendering mode
+        if (m_sequencer) {
+            m_sequencer->set_offline_rendering(false);
+        }
 
         // Restore original audio stream
         m_audio_stream = std::move(original_stream);

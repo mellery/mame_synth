@@ -2,6 +2,7 @@
 #include "nes_audio_mixer.h"
 #include "audio_device.h"
 #include "audio_stream.h"
+#include "debug_config.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -177,6 +178,25 @@ bool nes_sequencer::load_music_data(const music_data& music) {
     }
 
     m_music_data = music;
+
+    // Update TPQN from loaded music data (critical for correct timing!)
+    if (music.metadata().ticks_per_quarter != m_config.ticks_per_quarter_note) {
+        std::cout << "Updating sequencer TPQN: " << m_config.ticks_per_quarter_note
+                  << " -> " << music.metadata().ticks_per_quarter << std::endl;
+        m_config.ticks_per_quarter_note = music.metadata().ticks_per_quarter;
+        std::cout << "DEBUG: After update, m_config.ticks_per_quarter_note = "
+                  << m_config.ticks_per_quarter_note << std::endl;
+    }
+
+    if (g_debug_config.log_midi_parsing) {
+        std::stringstream ss;
+        ss << "Loading music data: " << music.notes().size() << " notes, "
+           << music.controls().size() << " controls, "
+           << music.tempos().size() << " tempo changes"
+           << ", TPQN=" << music.metadata().ticks_per_quarter;
+        DEBUG_LOG_MIDI(ss.str());
+    }
+
     generate_events_from_music_data();
 
     std::cout << "Loaded music data: " << m_music_data.notes().size() << " notes, "
@@ -243,13 +263,24 @@ bool nes_sequencer::play_from_time(music_time_t start_time) {
 
     // Set playback parameters
     m_current_tick = start_time;
+    m_last_scheduled_tick = start_time;  // Reset last scheduled tick when starting playback
     // Set playback start time slightly in the future to ensure proper timing
     m_playback_start_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
     m_playback_state = playback_state::PLAYING;
 
     // Schedule initial events
-    schedule_events_for_time(start_time, (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
-                           (m_microseconds_per_quarter.load() / 1000));
+    auto lookahead_ticks = (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
+                           (m_microseconds_per_quarter.load() / 1000);
+    schedule_events_for_time(start_time, lookahead_ticks);
+
+    if (g_debug_config.log_timing_info) {
+        std::stringstream ss;
+        ss << "Playback started: tick=" << start_time
+           << ", lookahead=" << lookahead_ticks << " ticks"
+           << ", total_notes=" << m_music_data.notes().size()
+           << ", queue_size=" << m_event_queue.size();
+        DEBUG_LOG_TIMING(ss.str());
+    }
 
     // Wake up the sequencer thread to start processing events
     m_thread_condition.notify_one();
@@ -350,6 +381,17 @@ void nes_sequencer::trigger_note(uint8_t channel, uint8_t note, uint8_t velocity
     if (is_channel_enabled(channel) && !is_channel_muted(channel)) {
         music_note music_note_event(nes_channel, note, velocity, 0, duration);
 
+        if (g_debug_config.log_midi_events) {
+            std::stringstream ss;
+            ss << "NOTE_ON: ch=" << static_cast<int>(channel)
+               << " -> NES_ch=" << static_cast<int>(nes_channel)
+               << ", note=" << static_cast<int>(note)
+               << ", vel=" << static_cast<int>(velocity)
+               << ", dur=" << duration << " ticks"
+               << ", tick=" << m_current_tick.load();
+            DEBUG_LOG_MIDI(ss.str());
+        }
+
         // Try to get NES APU device
         auto* device = m_audio_manager->get_device("NES APU");
         if (device) {
@@ -365,6 +407,16 @@ void nes_sequencer::stop_note(uint8_t channel, uint8_t note) {
     if (!m_audio_manager) return;
 
     uint8_t nes_channel = map_midi_to_nes_channel(channel);
+
+    if (g_debug_config.log_midi_events) {
+        std::stringstream ss;
+        ss << "NOTE_OFF: ch=" << static_cast<int>(channel)
+           << " -> NES_ch=" << static_cast<int>(nes_channel)
+           << ", note=" << static_cast<int>(note)
+           << ", tick=" << m_current_tick.load();
+        DEBUG_LOG_MIDI(ss.str());
+    }
+
     auto* device = m_audio_manager->get_device("NES APU");
     if (device) {
         device->stop_note(nes_channel, note);
@@ -480,9 +532,27 @@ void nes_sequencer::process_events() {
 void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_time_t lookahead_ticks) {
     auto end_tick = current_tick + lookahead_ticks;
 
+    // Only schedule events after the last scheduled tick to avoid re-scheduling
+    auto schedule_start_tick = std::max(current_tick, m_last_scheduled_tick);
+
+    if (schedule_start_tick >= end_tick) {
+        // Already scheduled events in this range
+        return;
+    }
+
+    if (g_debug_config.log_midi_timing) {
+        std::stringstream ss;
+        ss << "Scheduling events: schedule_start=" << schedule_start_tick
+           << ", end_tick=" << end_tick
+           << ", lookahead=" << lookahead_ticks << " ticks";
+        DEBUG_LOG_TIMING(ss.str());
+    }
+
+    int events_scheduled = 0;
+
     // Schedule note events
     for (const auto& note : m_music_data.notes()) {
-        if (note.start >= current_tick && note.start < end_tick) {
+        if (note.start >= schedule_start_tick && note.start < end_tick) {
             if (is_channel_enabled(note.channel) && !is_channel_muted(note.channel)) {
                 auto note_on_time = tick_to_real_time(note.start);
                 auto note_off_time = tick_to_real_time(note.start + note.duration);
@@ -495,13 +565,21 @@ void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_ti
                 // Note: mutex already held by caller
                 m_event_queue.push(note_on_event);
                 m_event_queue.push(note_off_event);
+                events_scheduled += 2;
             }
         }
     }
 
+    if (g_debug_config.log_midi_timing && events_scheduled > 0) {
+        std::stringstream ss;
+        ss << "Scheduled " << events_scheduled << " events in tick range ["
+           << current_tick << ", " << end_tick << "]";
+        DEBUG_LOG_TIMING(ss.str());
+    }
+
     // Schedule control events
     for (const auto& control : m_music_data.controls()) {
-        if (control.time >= current_tick && control.time < end_tick) {
+        if (control.time >= schedule_start_tick && control.time < end_tick) {
             auto control_time = tick_to_real_time(control.time);
             auto control_event = sequencer_event::control_change(control_time, control.time,
                                                                control.channel, control.controller, control.value);
@@ -513,7 +591,7 @@ void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_ti
 
     // Schedule program events
     for (const auto& program : m_music_data.programs()) {
-        if (program.time >= current_tick && program.time < end_tick) {
+        if (program.time >= schedule_start_tick && program.time < end_tick) {
             auto program_time = tick_to_real_time(program.time);
             auto program_event = sequencer_event::program_change(program_time, program.time,
                                                                program.channel, program.program);
@@ -525,7 +603,7 @@ void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_ti
 
     // Schedule tempo events
     for (const auto& tempo : m_music_data.tempos()) {
-        if (tempo.time >= current_tick && tempo.time < end_tick) {
+        if (tempo.time >= schedule_start_tick && tempo.time < end_tick) {
             auto tempo_time = tick_to_real_time(tempo.time);
             auto tempo_event = sequencer_event::tempo_change(tempo_time, tempo.time,
                                                            tempo.microseconds_per_quarter);
@@ -534,6 +612,9 @@ void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_ti
             m_event_queue.push(tempo_event);
         }
     }
+
+    // Update last scheduled tick to avoid re-scheduling
+    m_last_scheduled_tick = end_tick;
 }
 
 void nes_sequencer::process_event(const sequencer_event& event) {
@@ -590,14 +671,47 @@ nes_sequencer::sequencer_time_t nes_sequencer::tick_to_real_time(music_time_t ti
 }
 
 music_time_t nes_sequencer::real_time_to_tick(sequencer_time_t time) const {
-    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_playback_start_time);
-    auto microseconds_per_tick = (m_microseconds_per_quarter.load() / m_tempo_scale.load()) / m_config.ticks_per_quarter_note;
-    return static_cast<music_time_t>(elapsed.count() / microseconds_per_tick);
+    if (m_config.offline_rendering) {
+        // Offline mode: use sample count instead of wall-clock time
+        uint64_t samples = m_sample_count.load();
+        double seconds = static_cast<double>(samples) / m_config.sample_rate;
+        double microseconds = seconds * 1000000.0;
+
+        auto microseconds_per_tick = static_cast<double>(m_microseconds_per_quarter.load()) /
+                                     (m_tempo_scale.load() * m_config.ticks_per_quarter_note);
+
+        return static_cast<music_time_t>(microseconds / microseconds_per_tick);
+    } else {
+        // Real-time mode: use wall-clock time
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_playback_start_time);
+
+        // Guard against negative elapsed time
+        if (elapsed.count() < 0) {
+            return 0;
+        }
+
+        auto microseconds_per_tick = (m_microseconds_per_quarter.load() / m_tempo_scale.load()) / m_config.ticks_per_quarter_note;
+
+        return static_cast<music_time_t>(elapsed.count() / microseconds_per_tick);
+    }
 }
 
 nes_sequencer::duration_t nes_sequencer::ticks_to_duration(music_time_t ticks) const {
     auto microseconds_per_tick = (m_microseconds_per_quarter.load() / m_tempo_scale.load()) / m_config.ticks_per_quarter_note;
     return std::chrono::microseconds(static_cast<int64_t>(ticks * microseconds_per_tick));
+}
+
+void nes_sequencer::set_offline_rendering(bool enabled) {
+    m_config.offline_rendering = enabled;
+    if (enabled) {
+        m_sample_count = 0;  // Reset sample counter
+    }
+}
+
+void nes_sequencer::advance_samples(uint32_t num_samples) {
+    if (m_config.offline_rendering) {
+        m_sample_count.fetch_add(num_samples);
+    }
 }
 
 // Event generation from music data

@@ -296,6 +296,9 @@ private:
     void log_info(const std::string& message);
     void log_error(const std::string& message);
 
+    // Export helpers
+    double calculate_tempo_aware_duration() const;
+
     // File format detection and loading
     std::string detect_file_format(const std::string& filename);
     bool load_midi_file(const std::string& filename);

@@ -53,6 +53,7 @@ REGISTER_TEST(cli_integration, basic_command_execution) {
     config.output_file = "test_cli_basic.wav";
 
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Test help command
     auto result = cli.run_command("help");
@@ -75,6 +76,7 @@ REGISTER_TEST(cli_integration, configuration_commands) {
     nes_cli::cli_config cli_config;
     cli_config.quiet = true;
     nes_cli cli(cli_config);
+    ASSERT_TRUE(cli.initialize());
 
     // Create test configuration file
     create_test_config_file("test_cli_config.json");
@@ -135,6 +137,7 @@ REGISTER_TEST(cli_integration, realtime_control_commands) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Test realtime-stats command
     auto result = cli.run_command("realtime-stats");
@@ -206,6 +209,7 @@ REGISTER_TEST(cli_integration, midi_control_commands) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Test MIDI mapping command
     auto result = cli.run_command("midi-map 7 master_volume");
@@ -235,6 +239,7 @@ REGISTER_TEST(cli_integration, parameter_control_commands) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Test realtime-set command
     auto result = cli.run_command("realtime-set master_volume 0.7");
@@ -287,6 +292,7 @@ REGISTER_TEST(cli_integration, command_argument_parsing) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Test commands with no arguments
     auto result = cli.run_command("help");
@@ -331,6 +337,7 @@ REGISTER_TEST(cli_integration, error_recovery_and_state) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Execute valid command
     auto result = cli.run_command("config-preset performance");
@@ -370,6 +377,7 @@ REGISTER_TEST(cli_integration, configuration_persistence) {
     nes_cli::cli_config config;
     config.quiet = true;
     nes_cli cli(config);
+    ASSERT_TRUE(cli.initialize());
 
     // Set initial configuration
     auto result = cli.run_command("config-preset quality");

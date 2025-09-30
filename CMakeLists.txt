@@ -53,6 +53,7 @@ set(PROJECT_SOURCES
     src/nes_realtime_control.cpp
     src/nes_channel_assignment.cpp
     src/nes_channel_assignment_cli.cpp
+    src/debug_config.cpp
 )
 
 # Create main executable

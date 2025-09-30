@@ -1,4 +1,5 @@
 #include "nes_note_mapping.h"
+#include "debug_config.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -13,16 +14,35 @@ nes_note_mapper::nes_note_mapper(region_t region)
 uint16_t nes_note_mapper::note_to_timer(uint8_t note_number, channel_type_t channel_type) const {
     if (note_number >= 128) return MAX_TIMER_VALUE;
 
+    uint16_t timer_value;
     switch (channel_type) {
         case channel_type_t::PULSE:
-            return m_pulse_timer_table[note_number];
+            timer_value = m_pulse_timer_table[note_number];
+            break;
         case channel_type_t::TRIANGLE:
-            return m_triangle_timer_table[note_number];
+            timer_value = m_triangle_timer_table[note_number];
+            break;
         case channel_type_t::NOISE:
             // Noise uses period table, not timer
-            return note_to_noise_period(note_number);
+            timer_value = note_to_noise_period(note_number);
+            break;
+        default:
+            timer_value = MAX_TIMER_VALUE;
     }
-    return MAX_TIMER_VALUE;
+
+    if (g_debug_config.log_frequency_calc) {
+        double midi_freq = midi_note_to_frequency(note_number);
+        double nes_freq = timer_to_frequency(timer_value, channel_type);
+        std::stringstream ss;
+        ss << "Note mapping: MIDI_note=" << static_cast<int>(note_number)
+           << ", MIDI_freq=" << midi_freq << "Hz"
+           << ", timer=" << timer_value
+           << ", NES_freq=" << nes_freq << "Hz"
+           << ", channel=" << static_cast<int>(channel_type);
+        DEBUG_LOG_INFO("FREQ", ss.str());
+    }
+
+    return timer_value;
 }
 
 double nes_note_mapper::timer_to_frequency(uint16_t timer, channel_type_t channel_type) const {
