@@ -40,7 +40,12 @@ cmake ..
 make -j4  # Use 4 parallel jobs to avoid memory issues
 ```
 
-**Note**: The first build compiles 60+ MAME source files (audio, memory, debug, video subsystems, and 3rd-party libraries like FLAC, ZSTD, softfloat). Subsequent builds are much faster as only changed files are recompiled.
+**Important Build Notes**:
+- **First/Clean Build Time**: Initial build compiles 170+ MAME source files and can take 10-20 minutes
+- **Incremental Builds**: Subsequent builds are much faster (1-2 minutes) as only changed files recompile
+- **Clean Builds**: `rm -rf build` followed by rebuild will take full 10-20 minutes again
+- **Parallelism**: Use `-j2` or `-j4` based on available CPU/memory (avoid `-j$(nproc)` on systems with limited RAM)
+- **Components**: Compiles 60+ MAME core files, 3rd-party libraries (FLAC, ZSTD, LZMA, SoftFloat), and all project sources
 
 ### Quick Test
 
@@ -225,6 +230,37 @@ The project uses a comprehensive MAME integration approach:
 - `osd_stub.cpp` - Operating System Dependent layer stubs
 - `softfloat_wrapper.cpp` - C/C++ linkage bridge for SoftFloat library
 - `mame_minimal.h/cpp` - Compatibility layer between audio device manager and MAME types
+
+## References and Related Projects
+
+### MAME Documentation
+**URL**: https://docs.mamedev.org/
+
+Official MAME documentation covering architecture, device system, audio emulation, and development guidelines. Essential references:
+- **Device System**: Understanding MAME's device lifecycle, finder objects, and delegates
+- **Sound Emulation**: Audio device architecture, sound_stream system, and sample generation
+- **Building MAME**: Build system, dependencies, and platform-specific requirements
+- **Driver Development**: Creating and configuring machine drivers (relevant for device integration)
+
+This project integrates MAME's audio device subsystem directly, so understanding MAME's device architecture and sound system is crucial for development and debugging.
+
+### MAmidiMEmo
+**URL**: https://github.com/denjhang/MAmidiMEmo
+
+MAmidiMEmo is a MIDI-to-MAME synthesizer tool that inspired aspects of this project's architecture. Key similarities and differences:
+
+**Similarities**:
+- Both use MAME as the underlying audio device emulation engine
+- Both focus on accurate hardware emulation for music synthesis
+- Both provide MIDI file playback through emulated sound chips
+
+**Differences**:
+- **This project**: Command-line focused, C++ architecture, real-time audio streaming, intelligent channel assignment
+- **MAmidiMEmo**: GUI-based Windows application, broader device support (multiple chips simultaneously)
+- **This project**: Specialized NES-first approach with deep APU integration and musical analysis
+- **MAmidiMEmo**: Multi-device synthesizer with visual interface and broader chip coverage
+
+MAmidiMEmo is an excellent reference for understanding MAME audio device integration patterns and is recommended for users seeking a GUI-based multi-chip synthesizer experience.
 
 ## License
 
