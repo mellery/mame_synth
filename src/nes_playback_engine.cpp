@@ -525,18 +525,18 @@ bool nes_playback_engine::play_from_time(music_time_t start_time) {
     std::cout << "Starting playback from tick " << start_time << std::endl;
 
     try {
-        // Start audio stream if not already running
+        // Start sequencer playback FIRST to ensure events are scheduled before audio starts
+        if (!m_sequencer->play_from_time(start_time)) {
+            handle_error("Failed to start sequencer playback");
+            return false;
+        }
+
+        // Start audio stream after sequencer is ready
         if (m_audio_stream && !m_audio_stream->is_running()) {
             if (!m_audio_stream->start()) {
                 handle_error("Failed to start audio stream");
                 return false;
             }
-        }
-
-        // Start sequencer playback
-        if (!m_sequencer->play_from_time(start_time)) {
-            handle_error("Failed to start sequencer playback");
-            return false;
         }
 
         m_state = engine_state::PLAYING;
@@ -926,6 +926,24 @@ void nes_playback_engine::audio_callback(int16_t* buffer, size_t frames) {
         std::memset(buffer, 0, frames * sizeof(int16_t));
     }
 
+    // DEBUG: Check when audio first appears
+    static int callback_num = 0;
+    static bool found_audio = false;
+    if (!found_audio && callback_num < 10000) {
+        int16_t max_val = 0;
+        for (size_t i = 0; i < frames; i++) {
+            if (abs(buffer[i]) > abs(max_val)) max_val = buffer[i];
+        }
+        if (callback_num < 10 || abs(max_val) > 1000) {
+            std::cout << "audio_callback[" << callback_num << "]: max=" << max_val << std::endl;
+            if (abs(max_val) > 3000) {
+                found_audio = true;
+                std::cout << "*** FIRST AUDIO AT CALLBACK " << callback_num << " ***" << std::endl;
+            }
+        }
+        callback_num++;
+    }
+
     // Update performance metrics
     if (m_config.enable_performance_monitoring) {
         update_performance_metrics();
@@ -1287,7 +1305,10 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Enable offline rendering mode in sequencer for faster-than-realtime export
         if (m_sequencer) {
             m_sequencer->set_offline_rendering(true);
+            std::cout << "DEBUG: Offline rendering enabled, sample count reset to 0" << std::endl;
         }
+
+        // Note: Don't reset audio manager here as it clears necessary device state
 
         // Set up the audio callback for export
         export_stream->set_callback([this](int16_t* buffer, size_t frames) {
@@ -1303,14 +1324,21 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
 
         // The export stream will use the replaced main stream which has the audio manager
 
+        // Stop and shutdown the original stream before replacing it
+        // This ensures only one audio thread is running at a time
+        if (m_audio_stream) {
+            m_audio_stream->stop();
+            m_audio_stream->shutdown();
+        }
+
         // Initialize the export stream
         if (!export_stream->initialize()) {
             if (was_running) play();
             return false;
         }
 
-        // Temporarily replace the main audio stream
-        auto original_stream = std::move(m_audio_stream);
+        // Replace the main audio stream with export stream
+        // Don't save original_stream since it's been properly stopped
         m_audio_stream = std::move(export_stream);
 
         // Calculate duration with tempo awareness
@@ -1350,8 +1378,12 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Start export playback
         m_state = engine_state::READY;
         if (!play()) {
-            // Restore original stream
-            m_audio_stream = std::move(original_stream);
+            // Export failed to start - clean up
+            if (m_audio_stream) {
+                m_audio_stream->stop();
+                m_audio_stream->shutdown();
+            }
+            m_audio_stream.reset();
             if (was_running) play();
             return false;
         }
@@ -1448,12 +1480,15 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             m_sequencer->set_offline_rendering(false);
         }
 
-        // Restore original audio stream
-        m_audio_stream = std::move(original_stream);
+        // Clear export stream - no need to restore original since it was stopped
+        m_audio_stream.reset();
 
         // Restore original playback state
         if (was_running) {
-            play();
+            // Re-initialize audio for normal playback
+            if (initialize()) {
+                play();
+            }
         } else {
             m_state = original_state;
         }

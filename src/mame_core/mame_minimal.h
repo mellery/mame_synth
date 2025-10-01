@@ -8,6 +8,10 @@
  *
  * This file allows gradual integration with real MAME devices while maintaining
  * build compatibility and testing capability.
+ *
+ * NOTE: When using real MAME (emu.h included), most of these types are not defined
+ * to avoid conflicts. Only the compatibility layer classes (minimal_machine_config, etc.)
+ * are still defined.
  */
 
 #include <cstdint>
@@ -15,6 +19,9 @@
 #include <vector>
 #include <memory>
 #include <functional>
+
+// Only define minimal types if we're NOT using real MAME
+#ifndef __EMU_H__
 
 // Basic MAME types
 using u8 = uint8_t;
@@ -33,12 +40,20 @@ using endianness_t = int;
 static constexpr endianness_t ENDIANNESS_LITTLE = 0;
 static constexpr endianness_t ENDIANNESS_BIG = 1;
 
-// Forward declarations of MAME classes we'll need
+#endif // __EMU_H__
+
+// When using real MAME, import types from there
+#ifdef __EMU_H__
+// Real MAME types are already defined by emu.h
+// Just use them directly
+#else
+// Forward declarations of MAME classes we'll need (only when not using real MAME)
 class device_t;
 class machine_config;
 class running_machine;
 class device_sound_interface;
 class sound_stream;
+#endif
 
 /**
  * Minimal MAME machine configuration
@@ -50,8 +65,8 @@ public:
     ~minimal_machine_config();
 
     // Basic machine properties
-    u32 get_sample_rate() const { return m_sample_rate; }
-    void set_sample_rate(u32 rate) { m_sample_rate = rate; }
+    std::uint32_t get_sample_rate() const { return m_sample_rate; }
+    void set_sample_rate(std::uint32_t rate) { m_sample_rate = rate; }
 
     // Device registration
     void register_device(device_t* device);
@@ -61,7 +76,7 @@ public:
     size_t device_count() const { return m_devices.size(); }
 
 private:
-    u32 m_sample_rate = 44100;
+    std::uint32_t m_sample_rate = 44100;
     std::vector<device_t*> m_devices;
 };
 
@@ -71,7 +86,7 @@ private:
  */
 class minimal_device_t {
 public:
-    minimal_device_t(minimal_machine_config* config, const char* tag, u32 clock);
+    minimal_device_t(minimal_machine_config* config, const char* tag, std::uint32_t clock);
     virtual ~minimal_device_t();
 
     // Device lifecycle
@@ -81,7 +96,7 @@ public:
 
     // Device properties
     const std::string& tag() const { return m_tag; }
-    u32 clock() const { return m_clock; }
+    std::uint32_t clock() const { return m_clock; }
     minimal_machine_config* machine_config() const { return m_config; }
 
     // Device state
@@ -91,7 +106,7 @@ public:
 protected:
     minimal_machine_config* m_config;
     std::string m_tag;
-    u32 m_clock;
+    std::uint32_t m_clock;
     bool m_started = false;
 };
 
@@ -105,8 +120,8 @@ public:
     virtual ~minimal_device_sound_interface();
 
     // Sound generation
-    virtual void sound_stream_update(s16* buffer, size_t samples) = 0;
-    virtual u32 sample_rate() const { return 44100; }
+    virtual void sound_stream_update(std::int16_t* buffer, size_t samples) = 0;
+    virtual std::uint32_t sample_rate() const { return 44100; }
 
     // Stream management
     void allocate_stream(int inputs, int outputs);
@@ -154,9 +169,11 @@ private:
     std::function<T()> m_callback;
 };
 
-// Common MAME callback types
+// Common MAME callback types (only when not using real MAME)
+#ifndef __EMU_H__
 using write8_delegate = minimal_callback<void>;
 using read8_delegate = minimal_callback<u8>;
+#endif
 
 /**
  * Global minimal machine instance
@@ -176,9 +193,16 @@ private:
 };
 
 // Convenience macros for MAME compatibility
+// Note: These are only used when NOT including real MAME headers
+#ifndef ATTR_COLD
 #define ATTR_COLD
+#endif
+#ifndef DECLARE_DEVICE_TYPE
 #define DECLARE_DEVICE_TYPE(name, type) extern const device_type name;
+#endif
+#ifndef DEFINE_DEVICE_TYPE
 #define DEFINE_DEVICE_TYPE(name, type, shortname, fullname) const device_type name = nullptr;
+#endif
 
 // Utility functions
 inline std::string string_format(const char* format, ...) {

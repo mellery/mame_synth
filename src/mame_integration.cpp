@@ -1,20 +1,18 @@
+// Include real MAME core FIRST - must come before any of our headers
+#include "emu.h"
+
+// Include NES APU device
+#include "sound/nes_apu.h"
+
+// Now include our headers
 #include "mame_integration.h"
 #include "debug_config.h"
 #include <iostream>
 #include <cstring>
 #include <fstream>
 
-// Include minimal MAME core implementation
+// Include minimal MAME core implementation (for minimal_machine_config wrapper)
 #include "mame_core/mame_minimal.h"
-#include "mame_core/minimal_nesapu.h"
-
-// For now, we'll create stubs that simulate MAME integration
-// In a full implementation, these would include actual MAME headers:
-// #include "emu.h"
-// #include "devices/sound/nes_apu.h"
-
-// Temporary: Use void* for MAME types to avoid needing full MAME headers yet
-// In full implementation, these would be replaced with actual MAME types
 
 // MAME Machine Context Implementation
 mame_machine_context::mame_machine_context() {
@@ -160,23 +158,26 @@ bool mame_nes_apu_device::initialize() {
 
     std::cout << "  Initializing MAME NES APU device..." << std::endl;
 
-    // Create real minimal MAME NES APU device
-    m_nes_apu_device = new minimal_nesapu_device(
-        m_machine_context->get_machine_config(),
-        m_tag.c_str(),
-        m_clock_rate
-    );
+    // TODO: Create nesapu_device directly
+    // This requires proper MAME machine infrastructure (machine_config, running_machine)
+    // For now, this will fail - we need to implement the full MAME machine setup
 
-    if (!m_nes_apu_device) {
-        std::cout << "Failed to create minimal NES APU device" << std::endl;
+    std::cout << "  ERROR: nesapu_device creation not yet implemented" << std::endl;
+    std::cout << "  Need to create machine_config and running_machine first" << std::endl;
+
+    // Placeholder - will fail for now
+    m_apu = nullptr;
+
+    if (!m_apu) {
+        std::cout << "Failed to create nesapu_device (not yet implemented)" << std::endl;
         return false;
     }
 
     // Start the device
-    m_nes_apu_device->device_start();
+    // m_apu->device_start();
 
-    // Register with machine context (get the device_t* from minimal device)
-    m_machine_context->register_device(m_nes_apu_device->get_device_t());
+    // Register with machine context
+    // m_machine_context->register_device(m_apu);
 
     m_initialized = true;
     std::cout << "  MAME NES APU device initialized successfully" << std::endl;
@@ -184,14 +185,14 @@ bool mame_nes_apu_device::initialize() {
 }
 
 void mame_nes_apu_device::reset() {
-    if (!m_initialized || !m_nes_apu_device) {
+    if (!m_initialized || !m_apu) {
         return;
     }
 
     std::cout << "  Resetting MAME NES APU device..." << std::endl;
 
-    // Reset the real minimal MAME device
-    m_nes_apu_device->device_reset();
+    // Reset the APU (device_reset is public for nesapu_device)
+    m_apu->device_reset();
 
     std::cout << "  MAME NES APU device reset" << std::endl;
 }
@@ -203,11 +204,13 @@ void mame_nes_apu_device::shutdown() {
 
     std::cout << "  Shutting down MAME NES APU device..." << std::endl;
 
-    // Stop and delete the real minimal MAME device
-    if (m_nes_apu_device) {
-        m_nes_apu_device->device_stop();
-        delete m_nes_apu_device;
-        m_nes_apu_device = nullptr;
+    // TODO: Proper device shutdown
+    // device_stop() is protected - we'll need to handle this through machine shutdown
+    // For now, just clear pointers
+    if (m_apu) {
+        // m_apu->device_stop();  // Can't call - protected method
+        delete m_apu;
+        m_apu = nullptr;
     }
 
     m_initialized = false;
@@ -215,7 +218,7 @@ void mame_nes_apu_device::shutdown() {
 }
 
 void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
-    if (!m_initialized || !m_nes_apu_device) {
+    if (!m_initialized || !m_apu) {
         std::cout << "Cannot write register: device not initialized" << std::endl;
         return;
     }
@@ -242,12 +245,12 @@ void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
         DEBUG_LOG_REGISTER(offset, value, desc);
     }
 
-    // Write to the real minimal MAME NES APU device
-    m_nes_apu_device->write(offset, value);
+    // Write to the APU subdevice
+    m_apu->write(offset, value);
 }
 
 uint8_t mame_nes_apu_device::read_register(uint32_t offset) const {
-    if (!m_initialized || !m_nes_apu_device) {
+    if (!m_initialized || !m_apu) {
         std::cout << "Cannot read register: device not initialized" << std::endl;
         return 0;
     }
@@ -257,9 +260,9 @@ uint8_t mame_nes_apu_device::read_register(uint32_t offset) const {
         return 0;
     }
 
-    // Read from the real minimal MAME NES APU device
+    // Read from the APU subdevice
     if (offset == 0x15) {
-        return m_nes_apu_device->status_r();
+        return m_apu->status_r();
     }
 
     // Most registers are write-only
@@ -267,14 +270,41 @@ uint8_t mame_nes_apu_device::read_register(uint32_t offset) const {
 }
 
 void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_count) {
-    if (!m_initialized || !m_nes_apu_device) {
+    if (!m_initialized || !m_apu) {
         // Fill with silence
         std::memset(buffer, 0, sample_count * sizeof(int16_t));
         return;
     }
 
-    // Generate audio using the real minimal MAME NES APU device
-    m_nes_apu_device->sound_stream_update(buffer, sample_count);
+    // TODO: Get audio from MAME's sound system
+    // This requires accessing the sound stream and calling update
+    // For now, fill with silence
+    std::memset(buffer, 0, sample_count * sizeof(int16_t));
+
+    // DEBUG: Check what MAME is generating
+    static int call_count = 0;
+    static bool found_mame_audio = false;
+    if (!found_mame_audio && call_count < 10000) {
+        int16_t max_val = 0;
+        int max_idx = 0;
+        for (size_t i = 0; i < sample_count; i++) {
+            if (abs(buffer[i]) > abs(max_val)) {
+                max_val = buffer[i];
+                max_idx = i;
+            }
+        }
+        if (call_count < 10 || abs(max_val) > 1000) {
+            std::cout << "MAME_gen[" << call_count << "]: max=" << max_val
+                      << " at idx=" << max_idx
+                      << ", first_5=[" << buffer[0] << "," << buffer[1] << ","
+                      << buffer[2] << "," << buffer[3] << "," << buffer[4] << "]" << std::endl;
+            if (abs(max_val) > 3000) {
+                found_mame_audio = true;
+                std::cout << "*** MAME FIRST AUDIO AT CALL " << call_count << ", sample " << (call_count * sample_count + max_idx) << " ***" << std::endl;
+            }
+        }
+        call_count++;
+    }
 
     // Debug: Dump audio to WAV file (DISABLED for export testing)
     #ifdef ENABLE_DEBUG_WAV_OUTPUT
@@ -346,24 +376,22 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
 }
 
 uint32_t mame_nes_apu_device::get_sample_rate() const {
-    if (m_nes_apu_device) {
-        return m_nes_apu_device->sample_rate();
+    if (m_apu) {
+        // TODO: Get sample rate from APU device
+        // return m_apu->sample_rate();
+        return 44100; // Fallback for now
     }
     return 44100; // Fallback
 }
 
 device_t* mame_nes_apu_device::get_mame_device() {
-    if (m_nes_apu_device) {
-        return m_nes_apu_device->get_device_t();
-    }
-    return nullptr;
+    // Return the APU device
+    return m_apu;
 }
 
 nesapu_device* mame_nes_apu_device::get_nes_apu_device() {
-    if (m_nes_apu_device) {
-        return m_nes_apu_device->as_nesapu_device();
-    }
-    return nullptr;
+    // Return the APU subdevice
+    return m_apu;
 }
 
 // SNES S-DSP MAME Device Implementation (Placeholder)

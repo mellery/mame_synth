@@ -6,14 +6,13 @@
 #include <cstdint>
 
 // Forward declarations to avoid heavy MAME headers in our interface
-class nesapu_device;
+class nesapu_device;  // NES APU device
 class sound_stream;
 class machine_config;
 class device_t;
 
 // Include minimal MAME core for device integration
 #include "mame_core/mame_minimal.h"
-#include "mame_core/minimal_nesapu.h"
 
 /**
  * MAME Integration Layer
@@ -148,9 +147,10 @@ public:
     uint8_t read_status_register() const { return read_register(0x15); }
 
 private:
-    minimal_nesapu_device* m_nes_apu_device = nullptr; // Real minimal MAME NES APU
-    void* m_sound_stream = nullptr; // sound_stream* (opaque)
+    nesapu_device* m_apu = nullptr;      // NES APU device
+    void* m_sound_stream = nullptr;      // sound_stream* (opaque)
     std::vector<int16_t> m_audio_buffer;
+    uint32_t m_sample_rate = 44100;
 };
 
 /**

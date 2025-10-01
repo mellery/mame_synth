@@ -32,6 +32,84 @@ set(TEST_SOURCES
     test_midi_wav_validation.cpp
 )
 
+# MAME Core files (same as parent CMakeLists.txt)
+set(MAME_CORE_SOURCES
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/device.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/devdelegate.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/devcb.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/devfind.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/diexec.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/diimage.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/dimemory.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/dinetwork.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/dislot.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/disound.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/distate.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/machine.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/schedule.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/sound.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/speaker.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/emumem.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/emuopts.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/emucore.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/attotime.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/mconfig.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/validity.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/video.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/screen.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/driver.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/parameters.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/romload.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/debug/debugcpu.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/debug/debugcon.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/save.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/output.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/input.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/natkeyboard.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/config.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/fileio.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/bookkeeping.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/osd/osdcore.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/emu/ioport.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/strformat.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/vecstream.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/delegate.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/mfpresolve.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/xmlfile.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/ioprocs.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/options.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/path.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/language.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/corefile.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/corestr.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/unicode.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/ioprocsfilter.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/lib/util/unzip.cpp
+    ${CMAKE_SOURCE_DIR}/mame/src/osd/interface/inputseq.cpp
+)
+
+# MAME 3rdparty libraries
+set(MAME_3RDPARTY_SOURCES
+    ${CMAKE_SOURCE_DIR}/mame/3rdparty/expat/lib/xmlparse.c
+    ${CMAKE_SOURCE_DIR}/mame/3rdparty/expat/lib/xmlrole.c
+    ${CMAKE_SOURCE_DIR}/mame/3rdparty/expat/lib/xmltok.c
+    ${CMAKE_SOURCE_DIR}/mame/3rdparty/utf8proc/utf8proc.c
+)
+
+# MAME Audio device source files
+set(MAME_DEVICE_SOURCES
+    ${CMAKE_SOURCE_DIR}/mame/src/devices/sound/nes_apu.cpp
+)
+
+# Minimal emulator and OSD stubs
+set(EMULATOR_STUB_SOURCE
+    ../src/mame_core/emulator_stub.cpp
+)
+
+set(OSD_STUB_SOURCES
+    ../src/mame_core/osd_stub.cpp
+)
+
 # Source files to test (exclude main.cpp)
 set(LIB_SOURCES
     ../src/music_parser.cpp
@@ -39,7 +117,7 @@ set(LIB_SOURCES
     ../src/register_mapping.cpp
     ../src/mame_integration.cpp
     ../src/mame_core/mame_minimal.cpp
-    ../src/mame_core/minimal_nesapu.cpp
+    # Removed: ../src/mame_core/minimal_nesapu.cpp (replaced with real MAME device)
     ../src/nes_note_mapping.cpp
     ../src/audio_stream.cpp
     ../src/nes_audio_mixer.cpp
@@ -54,15 +132,21 @@ set(LIB_SOURCES
     ../src/debug_config.cpp
 )
 
+# Combine all MAME sources
+set(MAME_SOURCES ${MAME_CORE_SOURCES} ${MAME_DEVICE_SOURCES} ${MAME_3RDPARTY_SOURCES} ${EMULATOR_STUB_SOURCE} ${OSD_STUB_SOURCES})
+
 # Create test executable
-add_executable(mame_synth_tests ${TEST_SOURCES} ${LIB_SOURCES})
+add_executable(mame_synth_tests ${TEST_SOURCES} ${LIB_SOURCES} ${MAME_SOURCES})
+
+# Link MAME sources to tests
+target_link_libraries(mame_synth_tests z)
 
 # Create MAME integration test executable
 add_executable(mame_integration_tests
     test_mame_integration.cpp
     ../src/mame_integration.cpp
     ../src/mame_core/mame_minimal.cpp
-    ../src/mame_core/minimal_nesapu.cpp
+    # Removed: ../src/mame_core/minimal_nesapu.cpp (replaced with real MAME device)
     ../src/nes_note_mapping.cpp
     ../src/audio_stream.cpp
     ../src/audio_device.cpp
@@ -76,7 +160,11 @@ add_executable(mame_integration_tests
     ../src/nes_config.cpp
     ../src/register_mapping.cpp
     ../src/debug_config.cpp
+    ${MAME_SOURCES}
 )
+
+# Link zlib for mame_integration_tests
+target_link_libraries(mame_integration_tests z)
 
 # Link audio libraries to tests as well
 if(UNIX AND NOT APPLE)

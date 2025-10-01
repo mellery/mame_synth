@@ -176,11 +176,13 @@ audio_stream::stats audio_stream::get_stats() const {
 
 void audio_stream::audio_thread_proc() {
     std::cout << "Audio thread started (buffer size: " << m_config.buffer_size << " frames)" << std::endl;
+    std::cout << "DEBUG: m_file_output_mode=" << m_file_output_mode << std::endl;
 
     auto next_time = std::chrono::steady_clock::now();
     const auto buffer_duration = std::chrono::microseconds(
         (m_config.buffer_size * 1000000) / m_config.sample_rate);
 
+    int iteration = 0;
     while (m_running) {
         auto start_time = std::chrono::steady_clock::now();
 
@@ -194,18 +196,25 @@ void audio_stream::audio_thread_proc() {
         // Process audio
         process_audio_buffer(buffer.data(), m_config.buffer_size);
 
-        // Call post-process callback (for offline rendering sample counting)
+        // Call post-process callback AFTER generating audio (for offline rendering)
         if (m_post_process_callback) {
             m_post_process_callback(m_config.buffer_size);
         }
+
 
         // Check exit condition after processing
         if (!m_running) break;
 
         if (m_file_output_mode) {
             // Write to file
+            if (iteration < 20) {
+                std::cout << "DEBUG: iteration " << iteration << ", writing to file" << std::endl;
+            }
             write_frames_to_file(buffer.data(), m_config.buffer_size);
         } else {
+            if (iteration < 20) {
+                std::cout << "DEBUG: iteration " << iteration << ", NOT file mode" << std::endl;
+            }
             // Write to audio device
 #ifdef HAVE_ALSA
             if (m_alsa_handle) {
@@ -224,6 +233,8 @@ void audio_stream::audio_thread_proc() {
 
         // Update statistics
         update_stats();
+
+        iteration++;
 
         // Timing: real-time audio needs precise sleep, file output can run fast
         if (!m_file_output_mode) {
@@ -426,6 +437,19 @@ audio_file_writer::~audio_file_writer() {
 
 bool audio_file_writer::write_frames(const int16_t* buffer, size_t frames) {
     if (!m_file) return false;
+
+    // DEBUG: Log file positions for first 20 writes
+    static int write_count = 0;
+    if (write_count < 20) {
+        long pos = std::ftell(m_file.get());
+        int16_t max_val = 0;
+        for (size_t i = 0; i < frames; i++) {
+            if (abs(buffer[i]) > abs(max_val)) max_val = buffer[i];
+        }
+        std::cout << "write[" << write_count << "]: pos=" << pos
+                  << ", frames=" << frames << ", max=" << max_val << std::endl;
+        write_count++;
+    }
 
     if (g_debug_config.log_file_operations) {
         long pos_before = std::ftell(m_file.get());

@@ -33,12 +33,14 @@ cd mame_synth
 # Initialize MAME submodule (if needed)
 git submodule update --init --recursive
 
-# Build
+# Build (first build takes 10-15 minutes due to MAME subsystems)
 mkdir build
 cd build
 cmake ..
-make -j$(nproc)
+make -j4  # Use 4 parallel jobs to avoid memory issues
 ```
+
+**Note**: The first build compiles 60+ MAME source files (audio, memory, debug, video subsystems, and 3rd-party libraries like FLAC, ZSTD, softfloat). Subsequent builds are much faster as only changed files are recompiled.
 
 ### Quick Test
 
@@ -209,10 +211,20 @@ make clean && make  # Full rebuild with all warnings enabled
 
 ### MAME Integration
 
-The project uses a minimal MAME integration approach:
-- Only audio devices are used (no full machine emulation)
+The project uses a comprehensive MAME integration approach:
+- MAME audio devices with full subsystem support (60+ source files)
 - MAME is included as a git submodule
-- Custom minimal core in `src/mame_core/` handles device lifecycle
+- Minimal stubs in `src/mame_core/` for unused subsystems (video, network, debugging)
+- Direct integration with MAME's audio, memory, and device subsystems
+- Custom wrappers for C/C++ linkage compatibility (softfloat)
+
+**MAME Core Stubs** (`src/mame_core/`):
+- `debug_stub.cpp` - Minimal debugger/driver list implementations
+- `emulator_stub.cpp` - Emulator info stubs
+- `mame_stubs.cpp` - Stubs for video layouts, network, AVI, hash functions
+- `osd_stub.cpp` - Operating System Dependent layer stubs
+- `softfloat_wrapper.cpp` - C/C++ linkage bridge for SoftFloat library
+- `mame_minimal.h/cpp` - Compatibility layer between audio device manager and MAME types
 
 ## License
 
@@ -220,14 +232,25 @@ GPL-2.0 (required for MAME integration) - see `LICENSING.md` for details.
 
 ## Current Status
 
-**Phase 5 Complete**: Production-ready NES synthesizer with comprehensive features:
+**Phase 6 In Progress**: Full MAME integration with comprehensive subsystem support:
+- ✅ Complete MAME build integration (60+ source files)
+- ✅ Audio, memory, debug, video, and utility subsystems
+- ✅ SoftFloat, FLAC, ZSTD, LZMA compression libraries
+- ✅ Minimal stubs for unused features (network, layouts, drivers)
+- ✅ C/C++ linkage compatibility wrappers
+- ✅ Successful build of 38MB mame_synth executable
+- 🔄 Runtime MAME device initialization (in progress)
+- ⏳ Full NES APU playback testing
+- ⏳ Interactive CLI with MAME backend
+- ⏳ Test suite compatibility with MAME integration
+
+**Previous Achievements** (Phase 5):
 - ✅ Complete NES APU implementation with all 5 channels
 - ✅ Interactive CLI with 50+ commands
 - ✅ Intelligent channel assignment with 6 strategies
 - ✅ Real-time parameter control and automation
-- ✅ 95+ comprehensive tests with CI/CD pipeline
+- ✅ 95+ comprehensive tests
 - ✅ Cross-platform audio support
 - ✅ Configuration management with presets
-- ✅ Performance optimization (sub-millisecond latency)
 
 See `roadmap.md` for detailed development history and future expansion plans.
