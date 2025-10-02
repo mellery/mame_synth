@@ -37,14 +37,14 @@ bool mame_machine_context::initialize() {
     std::cout << "Setting up MAME runtime (running_machine)..." << std::endl;
 
     try {
-        // 1. Create emu_options
-        std::cout << "  Creating emu_options..." << std::endl;
-        m_options = new emu_options();
+        // 1. Create osd_options (not emu_options - needed for osd_common_t)
+        std::cout << "  Creating osd_options..." << std::endl;
+        m_options = new osd_options();
         m_options->set_value(OPTION_SAMPLERATE, std::to_string(m_sample_rate), OPTION_PRIORITY_CMDLINE);
 
-        // 2. Create minimal OSD interface
-        std::cout << "  Creating minimal OSD interface..." << std::endl;
-        m_osd = new minimal_osd_interface();
+        // 2. Create minimal OSD interface (now inherits from osd_common_t)
+        std::cout << "  Creating minimal OSD interface (osd_common_t-based)..." << std::endl;
+        m_osd = new minimal_osd_interface(*m_options);
 
         // 3. Create machine_manager
         std::cout << "  Creating machine_manager..." << std::endl;
@@ -57,9 +57,15 @@ bool mame_machine_context::initialize() {
 
         std::cout << "  machine_config created with NES APU devices!" << std::endl;
 
-        // Note: We DON'T create running_machine here.
-        // Devices can be looked up from machine_config.root_device().subdevice()
-        // running_machine is only needed if we want to actually RUN the emulation
+        // 5. Create running_machine to initialize devices
+        std::cout << "  Creating running_machine..." << std::endl;
+        m_running_machine = std::make_unique<running_machine>(*m_real_machine_config, *m_manager);
+
+        // 6. Devices are now created but not started
+        //    Device starting will be handled by write_register() on first use
+        //    This avoids the complexity of running MAME's full initialization
+        std::cout << "  running_machine created - devices exist but not yet started" << std::endl;
+        std::cout << "  Devices will be lazily initialized on first register write" << std::endl;
 
     } catch (const std::exception &e) {
         std::cout << "  ERROR: Exception creating MAME runtime: " << e.what() << std::endl;
@@ -256,6 +262,13 @@ void mame_nes_apu_device::reset() {
         return;
     }
 
+    // Only reset if the device has been started (has sound_stream initialized)
+    // With lazy initialization, the device may not have been started yet
+    if (!m_apu->started()) {
+        std::cout << "  MAME NES APU device not started yet - skipping reset" << std::endl;
+        return;
+    }
+
     std::cout << "  Resetting MAME NES APU device..." << std::endl;
 
     // Reset the APU (device_reset is public for nesapu_device)
@@ -280,6 +293,14 @@ void mame_nes_apu_device::shutdown() {
 
     m_initialized = false;
     std::cout << "  MAME NES APU device shut down" << std::endl;
+}
+
+bool mame_nes_apu_device::is_device_started() const {
+    if (!m_initialized || !m_apu) {
+        return false;
+    }
+    // Check if the MAME device has been started (has sound_stream initialized)
+    return m_apu->started();
 }
 
 void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {

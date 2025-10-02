@@ -11,7 +11,7 @@ class sound_stream;
 class machine_config;
 class device_t;
 class running_machine;
-class emu_options;
+class osd_options;  // Changed from emu_options to osd_options
 class osd_interface;
 class machine_manager;
 
@@ -60,7 +60,7 @@ private:
     minimal_machine_config* m_machine_config = nullptr; // Minimal MAME config wrapper
 
     // Full MAME runtime infrastructure
-    emu_options* m_options = nullptr;                     // MAME options
+    osd_options* m_options = nullptr;                    // MAME OSD options (needed for osd_common_t)
     osd_interface* m_osd = nullptr;                      // OSD interface (can't use unique_ptr - protected destructor)
     machine_manager* m_manager = nullptr;                // Machine manager (can't use unique_ptr - incomplete type)
     std::unique_ptr<machine_config> m_real_machine_config;  // Real MAME machine_config
@@ -87,6 +87,7 @@ public:
     virtual void reset() = 0;
     virtual void shutdown() = 0;
     virtual bool is_initialized() const = 0;
+    virtual bool is_device_started() const = 0;  // Check if MAME device has been started
 
     // Device identification
     virtual std::string get_device_name() const = 0;
@@ -123,6 +124,7 @@ public:
     void reset() override;
     void shutdown() override;
     bool is_initialized() const override { return m_initialized; }
+    bool is_device_started() const override;
 
     std::string get_device_name() const override { return "NES APU (MAME)"; }
     std::string get_device_tag() const override { return m_tag; }
@@ -180,6 +182,7 @@ public:
     void reset() override;
     void shutdown() override;
     bool is_initialized() const override { return m_initialized; }
+    bool is_device_started() const override { return false; }  // Placeholder - not implemented yet
 
     std::string get_device_name() const override { return "SNES S-DSP (MAME - Placeholder)"; }
     std::string get_device_tag() const override { return m_tag; }

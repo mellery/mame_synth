@@ -72,8 +72,9 @@ bool nes_apu_device::initialize(uint32_t sample_rate) {
     m_noise_short_mode = false;
     m_master_volume = 0xFF;
 
-    // Sync initial state to MAME device
-    sync_to_mame_device();
+    // Don't sync to MAME device yet - sound_stream isn't created until device_start()
+    // We'll sync on the first write_register() call or when playback starts
+    // sync_to_mame_device();  // SKIP - device not started yet
 
     m_initialized = true;
     std::cout << "NES APU device '" << m_tag << "' initialized at " << m_sample_rate << "Hz (with MAME backend)" << std::endl;
@@ -102,8 +103,11 @@ void nes_apu_device::reset() {
     m_triangle_linear = 0;
     m_noise_short_mode = false;
 
-    // Sync state to MAME device
-    sync_to_mame_device();
+    // Sync state to MAME device (only if device has been started)
+    // With lazy initialization, device may not be started yet
+    if (m_mame_device && m_mame_device->is_device_started()) {
+        sync_to_mame_device();
+    }
 
     std::cout << "NES APU device '" << m_tag << "' reset" << std::endl;
 }

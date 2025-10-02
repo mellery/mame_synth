@@ -822,7 +822,7 @@ bool nes_playback_engine::initialize_audio_system() {
         m_audio_manager = std::make_unique<nes_enhanced_audio_manager>();
 
         // Create NES APU device
-        auto nes_device = std::make_unique<nes_apu_device>("nes_playback", 1789773);
+        auto nes_device = std::make_unique<nes_apu_device>("nes_apu", 1789773);
         m_audio_manager->add_device(std::move(nes_device));
 
         // Initialize with configured mixer settings
@@ -1153,7 +1153,7 @@ void nes_playback_engine::set_pulse_duty_cycle(uint8_t channel, uint8_t duty) {
     }
 
     // Get the NES APU device and set duty cycle
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
     if (nes_device) {
         nes_device->set_pulse_duty_cycle(channel, duty);
         log_debug("Set pulse channel " + std::to_string(channel) + " duty cycle to " + std::to_string(duty));
@@ -1171,7 +1171,7 @@ void nes_playback_engine::set_triangle_linear_counter(uint8_t value) {
     value = std::min(value, uint8_t(127));
 
     // Get the NES APU device and set triangle linear counter
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
     if (nes_device) {
         nes_device->set_triangle_linear_counter(value);
         log_debug("Set triangle linear counter to " + std::to_string(value));
@@ -1186,7 +1186,7 @@ void nes_playback_engine::set_noise_mode(bool short_mode) {
     }
 
     // Get the NES APU device and set noise mode
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_playback"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
     if (nes_device) {
         nes_device->set_noise_mode(short_mode);
         log_debug("Set noise mode to " + std::string(short_mode ? "short" : "long"));

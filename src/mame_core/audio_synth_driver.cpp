@@ -13,6 +13,7 @@
 #include "audio_synth_driver.h"
 #include "speaker.h"
 #include "sound/nes_apu.h"
+#include "layout/generic.h"  // For layout_noscreens
 
 //**************************************************************************
 //  DRIVER STATE
@@ -42,20 +43,17 @@ protected:
 
 void audio_synth_state::audio_synth(machine_config &config)
 {
+	// Use MAME's properly compiled "no screens" layout for audio-only operation
+	// This layout shows "No screens attached" message but doesn't crash
+	config.set_default_layout(layout_noscreens);
+
 	// Add speakers for audio output
 	SPEAKER(config, "lspeaker").front_left();
 	SPEAKER(config, "rspeaker").front_right();
 
-	// Add NES APU devices (up to 8 instances like MAmidiMEmo supports)
-	// These will be accessible as "nes_apu_0" through "nes_apu_7"
-	for (int i = 0; i < 8; i++)
-	{
-		char tag[16];
-		snprintf(tag, sizeof(tag), "nes_apu_%d", i);
-
-		// Create NES APU device with standard NES APU clock rate (1.789773 MHz for NTSC)
-		NES_APU(config, tag, 1789773).add_route(ALL_OUTPUTS, "lspeaker", 0.50).add_route(ALL_OUTPUTS, "rspeaker", 0.50);
-	}
+	// Add single NES APU device with standard NES APU clock rate (1.789773 MHz for NTSC)
+	// Tag: "nes_apu" - provides 5 channels (2 pulse, 1 triangle, 1 noise, 1 DMC)
+	NES_APU(config, "nes_apu", 1789773).add_route(ALL_OUTPUTS, "lspeaker", 0.50).add_route(ALL_OUTPUTS, "rspeaker", 0.50);
 }
 
 //**************************************************************************

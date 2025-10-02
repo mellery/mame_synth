@@ -90,11 +90,11 @@ set(PROJECT_SOURCES
     src/nes_channel_assignment_cli.cpp
     src/debug_config.cpp
     src/mame_core/debug_stub.cpp
-    src/mame_core/emulator_stub.cpp
-    src/mame_core/osd_stub.cpp
-    src/mame_core/mame_stubs.cpp
     src/mame_core/softfloat_wrapper.cpp
     src/mame_core/minimal_osd.cpp
+    src/mame_core/osd_stubs.cpp
+    src/mame_core/nanosvg_impl.cpp
+    ${MAME_DIR}/build/generated/emu/layout/noscreens.cpp
 )
 
 # MAME Core files - required for device infrastructure
@@ -141,6 +141,30 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/emu/driver.cpp
     ${MAME_DIR}/src/emu/drivenum.cpp
     ${MAME_DIR}/src/emu/parameters.cpp
+    # OSD layer - osd_common_t implementation
+    ${MAME_DIR}/src/osd/modules/lib/osdobj_common.cpp
+    ${MAME_DIR}/src/osd/modules/osdmodule.cpp
+    ${MAME_DIR}/src/osd/watchdog.cpp
+    ${MAME_DIR}/src/osd/modules/lib/osdlib_unix.cpp
+    ${MAME_DIR}/src/osd/modules/osdwindow.cpp
+    ${MAME_DIR}/src/osd/modules/sound/sound_module.cpp
+    # OSD module stubs - "none" implementations for modules we don't use
+    ${MAME_DIR}/src/osd/modules/debugger/none.cpp
+    ${MAME_DIR}/src/osd/modules/netdev/none.cpp
+    ${MAME_DIR}/src/osd/modules/midi/none.cpp
+    ${MAME_DIR}/src/osd/modules/render/drawnone.cpp
+    ${MAME_DIR}/src/osd/modules/font/font_none.cpp
+    # Input modules (common + none)
+    ${MAME_DIR}/src/osd/modules/input/input_common.cpp
+    ${MAME_DIR}/src/osd/modules/input/input_none.cpp
+    # Monitor modules (just common - no actual monitors needed)
+    ${MAME_DIR}/src/osd/modules/monitor/monitor_common.cpp
+    # Output modules (none + console + network for registration)
+    ${MAME_DIR}/src/osd/modules/output/none.cpp
+    ${MAME_DIR}/src/osd/modules/output/console.cpp
+    ${MAME_DIR}/src/osd/modules/output/network.cpp
+    # Sound modules (just none - we handle audio ourselves)
+    ${MAME_DIR}/src/osd/modules/sound/none.cpp
     ${MAME_DIR}/src/emu/romload.cpp
     # Debug subsystem - complete set of files
     ${MAME_DIR}/src/emu/debugger.cpp
@@ -203,7 +227,12 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/lib/util/msdib.cpp
     ${MAME_DIR}/src/lib/util/wavwrite.cpp
     ${MAME_DIR}/src/lib/util/disasmintf.cpp
+    ${MAME_DIR}/src/lib/util/aviio.cpp
+    ${MAME_DIR}/src/lib/util/path_to_regex.cpp
     ${MAME_DIR}/src/osd/interface/inputseq.cpp
+    ${MAME_DIR}/src/osd/strconv.cpp
+    ${MAME_DIR}/src/osd/modules/file/posixptty.cpp
+    ${MAME_DIR}/src/osd/modules/file/posixsocket.cpp
     ${MAME_DIR}/src/osd/modules/file/posixfile.cpp
     ${MAME_DIR}/src/osd/modules/file/posixdir.cpp
     # Memory system - needed for memory_view and handlers
@@ -275,17 +304,9 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/3rdparty/softfloat3/source/8086-SSE/s_commonNaNToF64UI.c
 )
 
-# Minimal OSD stub - we provide minimal implementations for OSD functions
-set(OSD_STUB_SOURCES
-    src/mame_core/osd_stub.cpp
-)
-
-# Minimal emulator info stub - MAME needs this but we provide minimal version
-set(EMULATOR_STUB_SOURCE
-    src/mame_core/emulator_stub.cpp
-    src/mame_core/debug_stub.cpp
+# Audio synth driver sources
+set(AUDIO_SYNTH_SOURCES
     src/mame_core/audio_synth_driver.cpp
-    src/mame_core/minimal_osd.cpp
 )
 
 # FLAC library sources (exclude OGG-related files)
@@ -361,7 +382,7 @@ set(MAME_DEVICE_SOURCES
 )
 
 # Combine all MAME sources
-set(MAME_SOURCES ${MAME_CORE_SOURCES} ${MAME_DEVICE_SOURCES} ${MAME_3RDPARTY_SOURCES} ${EMULATOR_STUB_SOURCE} ${OSD_STUB_SOURCES})
+set(MAME_SOURCES ${MAME_CORE_SOURCES} ${MAME_DEVICE_SOURCES} ${MAME_3RDPARTY_SOURCES} ${AUDIO_SYNTH_SOURCES})
 
 # Create main executable
 add_executable(mame_synth ${PROJECT_SOURCES} ${MAME_SOURCES})
@@ -408,10 +429,20 @@ else()
     message(STATUS "To install pugixml on macOS: brew install pugixml")
 endif()
 
+# Find and link SDL2 (required by osdlib_unix.cpp)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SDL2 sdl2)
+if(SDL2_FOUND)
+    target_include_directories(mame_synth PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(mame_synth ${SDL2_LIBRARIES})
+    message(STATUS "Found SDL2: ${SDL2_LIBRARIES}")
+else()
+    message(FATAL_ERROR "SDL2 not found - required for OSD layer. Install with: sudo apt-get install libsdl2-dev")
+endif()
+
 # Find and link audio libraries
 if(UNIX AND NOT APPLE)
     # Linux - use ALSA
-    find_package(PkgConfig REQUIRED)
     pkg_check_modules(ALSA alsa)
     if(ALSA_FOUND)
         target_include_directories(mame_synth PRIVATE ${ALSA_INCLUDE_DIRS})
