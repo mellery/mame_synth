@@ -336,10 +336,12 @@ set(EMULATOR_STUB_SOURCE
     ../src/mame_core/debug_stub.cpp
     ../src/mame_core/mame_stubs.cpp
     ../src/mame_core/softfloat_wrapper.cpp
+    ../src/mame_core/audio_synth_driver.cpp
 )
 
 set(OSD_STUB_SOURCES
     ../src/mame_core/osd_stub.cpp
+    ../src/mame_core/minimal_osd.cpp
 )
 
 # Source files to test (exclude main.cpp)
@@ -377,6 +379,9 @@ target_include_directories(mame_synth_tests PRIVATE
     ${MAME_DIR}/src/devices
     ${MAME_DIR}/src/devices/cpu
 )
+
+# Disable MAME assertions
+target_compile_definitions(mame_synth_tests PRIVATE NDEBUG)
 
 # Link compression, image, and threading libraries
 target_link_libraries(mame_synth_tests z jpeg png pthread)

@@ -10,6 +10,10 @@ class nesapu_device;  // NES APU device
 class sound_stream;
 class machine_config;
 class device_t;
+class running_machine;
+class emu_options;
+class osd_interface;
+class machine_manager;
 
 // Include minimal MAME core for device integration
 #include "mame_core/mame_minimal.h"
@@ -47,11 +51,21 @@ public:
 
     // Internal - should not be used directly by client code
     minimal_machine_config* get_machine_config() { return m_machine_config; }
+    machine_config* get_real_machine_config() { return m_real_machine_config.get(); }
+    running_machine* get_running_machine() { return m_running_machine.get(); }
     void register_device(device_t* device);
 
 private:
     bool m_initialized = false;
-    minimal_machine_config* m_machine_config = nullptr; // Real minimal MAME config
+    minimal_machine_config* m_machine_config = nullptr; // Minimal MAME config wrapper
+
+    // Full MAME runtime infrastructure
+    emu_options* m_options = nullptr;                     // MAME options
+    osd_interface* m_osd = nullptr;                      // OSD interface (can't use unique_ptr - protected destructor)
+    machine_manager* m_manager = nullptr;                // Machine manager (can't use unique_ptr - incomplete type)
+    std::unique_ptr<machine_config> m_real_machine_config;  // Real MAME machine_config
+    std::unique_ptr<running_machine> m_running_machine;  // Real MAME running_machine
+
     std::vector<device_t*> m_devices;
     uint32_t m_sample_rate = 44100;
 
@@ -147,7 +161,7 @@ public:
     uint8_t read_status_register() const { return read_register(0x15); }
 
 private:
-    nesapu_device* m_apu = nullptr;      // NES APU device
+    nesapu_device* m_apu = nullptr;      // NES APU device (owned by running_machine)
     void* m_sound_stream = nullptr;      // sound_stream* (opaque)
     std::vector<int16_t> m_audio_buffer;
     uint32_t m_sample_rate = 44100;

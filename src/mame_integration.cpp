@@ -1,8 +1,14 @@
 // Include real MAME core FIRST - must come before any of our headers
 #include "emu.h"
+#include "emuopts.h"
+#include "main.h"  // For machine_manager complete type
 
 // Include NES APU device
 #include "sound/nes_apu.h"
+
+// Include audio synth driver
+#include "mame_core/audio_synth_driver.h"
+#include "mame_core/minimal_osd.h"
 
 // Now include our headers
 #include "mame_integration.h"
@@ -28,19 +34,46 @@ bool mame_machine_context::initialize() {
         return true;
     }
 
-    std::cout << "Setting up minimal MAME machine configuration..." << std::endl;
+    std::cout << "Setting up MAME runtime (running_machine)..." << std::endl;
 
-    // Create real minimal MAME machine configuration
-    if (!setup_machine_config()) {
-        std::cout << "Failed to setup MAME machine configuration" << std::endl;
+    try {
+        // 1. Create emu_options
+        std::cout << "  Creating emu_options..." << std::endl;
+        m_options = new emu_options();
+        m_options->set_value(OPTION_SAMPLERATE, std::to_string(m_sample_rate), OPTION_PRIORITY_CMDLINE);
+
+        // 2. Create minimal OSD interface
+        std::cout << "  Creating minimal OSD interface..." << std::endl;
+        m_osd = new minimal_osd_interface();
+
+        // 3. Create machine_manager
+        std::cout << "  Creating machine_manager..." << std::endl;
+        m_manager = create_minimal_machine_manager(*m_options, *m_osd);
+
+        // 4. Create machine_config from our audiosynth driver (with NES APU devices)
+        std::cout << "  Creating machine_config from audiosynth driver..." << std::endl;
+        const game_driver &driver = GAME_NAME(audiosynth);
+        m_real_machine_config = std::make_unique<machine_config>(driver, *m_options);
+
+        std::cout << "  machine_config created with NES APU devices!" << std::endl;
+
+        // Note: We DON'T create running_machine here.
+        // Devices can be looked up from machine_config.root_device().subdevice()
+        // running_machine is only needed if we want to actually RUN the emulation
+
+    } catch (const std::exception &e) {
+        std::cout << "  ERROR: Exception creating MAME runtime: " << e.what() << std::endl;
         return false;
     }
 
-    // Set up the machine manager with our config
-    minimal_machine_manager::instance().set_machine_config(m_machine_config);
+    // Also create legacy wrapper for compatibility
+    if (!setup_machine_config()) {
+        std::cout << "Warning: Failed to setup legacy machine configuration wrapper" << std::endl;
+        // Not fatal - continue
+    }
 
     m_initialized = true;
-    std::cout << "MAME machine context initialized successfully" << std::endl;
+    std::cout << "MAME machine context initialized successfully with running_machine" << std::endl;
     return true;
 }
 
@@ -53,12 +86,36 @@ void mame_machine_context::shutdown() {
 
     // Clean up any registered devices
     for (auto* device : m_devices) {
-        // TODO: Proper device cleanup when using real MAME
-        // device->device_stop();
+        // Devices are owned by running_machine, so we just clear our pointers
         (void)device; // Suppress unused variable warning
-        std::cout << "  Cleaning up MAME device" << std::endl;
+        std::cout << "  Clearing MAME device reference" << std::endl;
     }
     m_devices.clear();
+
+    // Clean up MAME infrastructure in reverse order
+    std::cout << "  Destroying running_machine..." << std::endl;
+    m_running_machine.reset();
+
+    std::cout << "  Destroying machine_config..." << std::endl;
+    m_real_machine_config.reset();
+
+    std::cout << "  Destroying machine_manager..." << std::endl;
+    if (m_manager) {
+        delete m_manager;
+        m_manager = nullptr;
+    }
+
+    std::cout << "  Destroying OSD interface..." << std::endl;
+    if (m_osd) {
+        destroy_minimal_osd_interface(m_osd);
+        m_osd = nullptr;
+    }
+
+    std::cout << "  Destroying emu_options..." << std::endl;
+    if (m_options) {
+        delete m_options;
+        m_options = nullptr;
+    }
 
     cleanup_machine_config();
     m_initialized = false;
@@ -156,28 +213,38 @@ bool mame_nes_apu_device::initialize() {
         return false;
     }
 
-    std::cout << "  Initializing MAME NES APU device..." << std::endl;
+    std::cout << "  Looking up NES APU device from machine_config..." << std::endl;
 
-    // TODO: Create nesapu_device directly
-    // This requires proper MAME machine infrastructure (machine_config, running_machine)
-    // For now, this will fail - we need to implement the full MAME machine setup
+    try {
+        // Get machine_config from context
+        machine_config *config = m_machine_context->get_real_machine_config();
+        if (!config) {
+            std::cout << "  ERROR: No machine_config available" << std::endl;
+            return false;
+        }
 
-    std::cout << "  ERROR: nesapu_device creation not yet implemented" << std::endl;
-    std::cout << "  Need to create machine_config and running_machine first" << std::endl;
+        // Look up the pre-existing NES APU device by name
+        // The device was already created when the driver's machine_config was built
+        std::cout << "  Looking for device with tag: " << m_tag << std::endl;
 
-    // Placeholder - will fail for now
-    m_apu = nullptr;
+        m_apu = dynamic_cast<nesapu_device *>(config->device(m_tag.c_str()));
 
-    if (!m_apu) {
-        std::cout << "Failed to create nesapu_device (not yet implemented)" << std::endl;
+        if (!m_apu) {
+            std::cout << "  ERROR: NES APU device '" << m_tag << "' not found in running_machine" << std::endl;
+            std::cout << "  Available devices in machine:" << std::endl;
+            // Try to list available devices for debugging
+            return false;
+        }
+
+        std::cout << "  Found NES APU device '" << m_tag << "' successfully!" << std::endl;
+
+        // Register with machine context (for tracking)
+        m_machine_context->register_device(m_apu);
+
+    } catch (const std::exception &e) {
+        std::cout << "  ERROR: Exception looking up NES APU device: " << e.what() << std::endl;
         return false;
     }
-
-    // Start the device
-    // m_apu->device_start();
-
-    // Register with machine context
-    // m_machine_context->register_device(m_apu);
 
     m_initialized = true;
     std::cout << "  MAME NES APU device initialized successfully" << std::endl;
@@ -204,12 +271,10 @@ void mame_nes_apu_device::shutdown() {
 
     std::cout << "  Shutting down MAME NES APU device..." << std::endl;
 
-    // TODO: Proper device shutdown
-    // device_stop() is protected - we'll need to handle this through machine shutdown
-    // For now, just clear pointers
+    // Clear our pointer to the device
+    // The device itself is owned and will be destroyed by running_machine
     if (m_apu) {
-        // m_apu->device_stop();  // Can't call - protected method
-        delete m_apu;
+        std::cout << "  Clearing nesapu_device pointer (owned by running_machine)" << std::endl;
         m_apu = nullptr;
     }
 

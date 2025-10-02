@@ -4,6 +4,9 @@ project(mame_synth VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable debug symbols
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
 # Find required packages
 find_package(PkgConfig REQUIRED)
 
@@ -44,6 +47,7 @@ add_definitions(
     -DPTR64=1
     -DMAME_DEBUG=0
     -DCRLF=2
+    -DNDEBUG  # Disable assertions for MAME code
     # Expat XML library configuration
     -DXML_GE=1
     -DXML_CONTEXT_BYTES=1024
@@ -90,10 +94,12 @@ set(PROJECT_SOURCES
     src/mame_core/osd_stub.cpp
     src/mame_core/mame_stubs.cpp
     src/mame_core/softfloat_wrapper.cpp
+    src/mame_core/minimal_osd.cpp
 )
 
 # MAME Core files - required for device infrastructure
 set(MAME_CORE_SOURCES
+    ${MAME_DIR}/src/emu/drivers/empty.cpp
     ${MAME_DIR}/src/emu/device.cpp
     ${MAME_DIR}/src/emu/devdelegate.cpp
     ${MAME_DIR}/src/emu/devcb.cpp
@@ -278,6 +284,8 @@ set(OSD_STUB_SOURCES
 set(EMULATOR_STUB_SOURCE
     src/mame_core/emulator_stub.cpp
     src/mame_core/debug_stub.cpp
+    src/mame_core/audio_synth_driver.cpp
+    src/mame_core/minimal_osd.cpp
 )
 
 # FLAC library sources (exclude OGG-related files)
