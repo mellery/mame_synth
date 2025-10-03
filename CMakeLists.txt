@@ -22,6 +22,7 @@ include_directories(
     ${MAME_SRC_DIR}/lib/util
     ${MAME_SRC_DIR}/osd
     ${MAME_SRC_DIR}/devices
+    ${MAME_SRC_DIR}/frontend/mame
     ${MAME_DIR}/3rdparty
     ${MAME_DIR}/3rdparty/rapidjson/include
     ${MAME_DIR}/3rdparty/expat/lib
@@ -90,8 +91,10 @@ set(PROJECT_SOURCES
     src/nes_channel_assignment_cli.cpp
     src/debug_config.cpp
     src/mame_core/debug_stub.cpp
+    src/mame_core/emulator_stub.cpp
     src/mame_core/softfloat_wrapper.cpp
     src/mame_core/minimal_osd.cpp
+    src/mame_core/mame_midi_player.cpp
     src/mame_core/osd_stubs.cpp
     src/mame_core/nanosvg_impl.cpp
     ${MAME_DIR}/build/generated/emu/layout/noscreens.cpp
@@ -126,6 +129,7 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/emu/attotime.cpp
     ${MAME_DIR}/src/emu/mconfig.cpp
     ${MAME_DIR}/src/emu/validity.cpp
+    ${MAME_DIR}/src/emu/xtal.cpp
     # Video subsystem - needed by machine.cpp even for audio-only
     ${MAME_DIR}/src/emu/video.cpp
     ${MAME_DIR}/src/emu/screen.cpp
@@ -379,6 +383,12 @@ set(MAME_3RDPARTY_SOURCES
 set(MAME_DEVICE_SOURCES
     # NES APU (audio device)
     ${MAME_DIR}/src/devices/sound/nes_apu.cpp
+    # M6502 CPU core (required for RP2A03)
+    ${MAME_DIR}/src/devices/cpu/m6502/m6502.cpp
+    ${MAME_DIR}/src/devices/cpu/m6502/m6502d.cpp
+    # RP2A03 CPU (NES CPU with integrated APU)
+    ${MAME_DIR}/src/devices/cpu/m6502/rp2a03.cpp
+    ${MAME_DIR}/src/devices/cpu/m6502/rp2a03d.cpp
 )
 
 # Combine all MAME sources

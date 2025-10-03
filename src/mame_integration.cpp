@@ -61,11 +61,46 @@ bool mame_machine_context::initialize() {
         std::cout << "  Creating running_machine..." << std::endl;
         m_running_machine = std::make_unique<running_machine>(*m_real_machine_config, *m_manager);
 
-        // 6. Devices are now created but not started
-        //    Device starting will be handled by write_register() on first use
-        //    This avoids the complexity of running MAME's full initialization
-        std::cout << "  running_machine created - devices exist but not yet started" << std::endl;
-        std::cout << "  Devices will be lazily initialized on first register write" << std::endl;
+        // 6. Start devices by running machine briefly
+        //    machine.run() will call start() internally which initializes all devices
+        //    We'll run in a separate thread and schedule immediate exit
+        std::cout << "  running_machine created - starting devices via machine.run()..." << std::endl;
+
+        std::atomic<bool> machine_started{false};
+        std::atomic<bool> exit_scheduled{false};
+
+        std::thread machine_thread([this, &machine_started, &exit_scheduled]() {
+            try {
+                std::cout << "  Machine thread: Calling machine.run()..." << std::endl;
+                machine_started = true;
+
+                // This will call start() which initializes devices,
+                // then enter the emulation loop
+                // quiet = false to see output
+                int result = m_running_machine->run(false);
+
+                std::cout << "  Machine thread: run() returned with code " << result << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "  Machine thread error: " << e.what() << std::endl;
+            }
+        });
+
+        // Wait for machine to start
+        std::cout << "  Waiting for machine to start devices..." << std::endl;
+        while (!machine_started) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        // Give it significant time to complete start() and soft_reset()
+        std::cout << "  Allowing time for device initialization..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        // Devices should now be started - detach the emulation thread
+        // and let it run in the background. We'll use the devices from the main thread.
+        std::cout << "  Detaching machine thread (letting emulation run in background)..." << std::endl;
+        machine_thread.detach();
+
+        std::cout << "  Devices should now be started and ready for use" << std::endl;
 
     } catch (const std::exception &e) {
         std::cout << "  ERROR: Exception creating MAME runtime: " << e.what() << std::endl;
@@ -147,7 +182,14 @@ std::unique_ptr<mame_audio_device_base> mame_machine_context::create_nes_apu(
     }
 
     std::cout << "Creating MAME NES APU device '" << tag << "' @ " << clock_rate << "Hz" << std::endl;
-    return std::make_unique<mame_nes_apu_device>(this, tag, clock_rate);
+    auto device = std::make_unique<mame_nes_apu_device>(this, tag, clock_rate);
+
+    // Set up OSD audio callback to route MAME's audio to this device
+    set_audio_callback([dev = device.get()](const int16_t* buffer, int sample_count) {
+        dev->on_audio_callback(buffer, sample_count);
+    });
+
+    return device;
 }
 
 std::unique_ptr<mame_audio_device_base> mame_machine_context::create_snes_dsp(
@@ -165,6 +207,20 @@ std::unique_ptr<mame_audio_device_base> mame_machine_context::create_snes_dsp(
 void mame_machine_context::register_device(device_t* device) {
     if (device) {
         m_devices.push_back(device);
+    }
+}
+
+void mame_machine_context::set_audio_callback(audio_callback_t callback) {
+    if (!m_osd) {
+        std::cout << "ERROR: Cannot set audio callback - OSD not initialized" << std::endl;
+        return;
+    }
+
+    // Cast to our minimal_osd_interface to access the set_audio_callback method
+    minimal_osd_interface* minimal_osd = static_cast<minimal_osd_interface*>(m_osd);
+    if (minimal_osd) {
+        minimal_osd->set_audio_callback(callback);
+        std::cout << "Audio callback registered with MAME OSD" << std::endl;
     }
 }
 
@@ -200,7 +256,11 @@ mame_nes_apu_device::mame_nes_apu_device(mame_machine_context* machine_ctx,
     m_machine_context = machine_ctx;
     m_tag = tag;
     m_clock_rate = clock_rate;
-    m_audio_buffer.resize(2048); // Pre-allocate audio buffer
+
+    // Pre-allocate ring buffer - 1 second at 44100Hz stereo
+    m_audio_buffer.resize(44100 * 2);
+    m_buffer_write_pos = 0;
+    m_buffer_read_pos = 0;
 
     std::cout << "  NES APU device created with tag '" << tag << "'" << std::endl;
 }
@@ -309,6 +369,21 @@ void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
         return;
     }
 
+    // Check if device has been started - if not, try reset to initialize
+    if (!m_apu->started()) {
+        static bool tried_reset = false;
+        if (!tried_reset) {
+            std::cout << "MAME NES APU: Device not started, trying device_reset()..." << std::endl;
+            m_apu->reset();
+            tried_reset = true;
+            if (m_apu->started()) {
+                std::cout << "MAME NES APU: Device started via reset!" << std::endl;
+            } else {
+                std::cout << "MAME NES APU: Device still not started after reset" << std::endl;
+            }
+        }
+    }
+
     if (offset > 0x17) {
         std::cout << "Invalid NES APU register offset: $" << std::hex << offset << std::endl;
         return;
@@ -332,7 +407,20 @@ void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
     }
 
     // Write to the APU subdevice
-    m_apu->write(offset, value);
+    // Devices should now be properly started via machine.run()
+    if (!m_apu->started()) {
+        std::cout << "WARNING: MAME NES APU device not started, write may fail" << std::endl;
+    }
+
+    try {
+        m_apu->write(offset, value);
+    } catch (const std::exception& e) {
+        std::cout << "EXCEPTION in m_apu->write(): " << e.what() << std::endl;
+        throw;
+    } catch (...) {
+        std::cout << "UNKNOWN EXCEPTION in m_apu->write()" << std::endl;
+        throw;
+    }
 }
 
 uint8_t mame_nes_apu_device::read_register(uint32_t offset) const {
@@ -362,10 +450,35 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
         return;
     }
 
-    // TODO: Get audio from MAME's sound system
-    // This requires accessing the sound stream and calling update
-    // For now, fill with silence
-    std::memset(buffer, 0, sample_count * sizeof(int16_t));
+    // MAME's sound system generates audio automatically when:
+    // 1. Registers are written (which we do in write_register)
+    // 2. The sound_manager's timer fires periodically
+    // 3. The OSD callback receives the mixed audio
+    //
+    // For now, read from the ring buffer that gets filled by the OSD callback
+
+    // Read samples from ring buffer
+    std::lock_guard<std::mutex> lock(m_buffer_mutex);
+
+    size_t samples_available = 0;
+    if (m_buffer_write_pos >= m_buffer_read_pos) {
+        samples_available = m_buffer_write_pos - m_buffer_read_pos;
+    } else {
+        samples_available = m_audio_buffer.size() - m_buffer_read_pos + m_buffer_write_pos;
+    }
+
+    size_t samples_to_copy = std::min(sample_count, samples_available);
+
+    // Copy samples from ring buffer
+    for (size_t i = 0; i < samples_to_copy; i++) {
+        buffer[i] = m_audio_buffer[m_buffer_read_pos];
+        m_buffer_read_pos = (m_buffer_read_pos + 1) % m_audio_buffer.size();
+    }
+
+    // Fill remaining with silence if not enough samples
+    if (samples_to_copy < sample_count) {
+        std::memset(buffer + samples_to_copy, 0, (sample_count - samples_to_copy) * sizeof(int16_t));
+    }
 
     // DEBUG: Check what MAME is generating
     static int call_count = 0;
@@ -478,6 +591,22 @@ device_t* mame_nes_apu_device::get_mame_device() {
 nesapu_device* mame_nes_apu_device::get_nes_apu_device() {
     // Return the APU subdevice
     return m_apu;
+}
+
+// OSD audio callback handler - called by MAME's sound_manager via OSD
+void mame_nes_apu_device::on_audio_callback(const int16_t* buffer, int sample_count) {
+    std::lock_guard<std::mutex> lock(m_buffer_mutex);
+
+    // Write samples to ring buffer
+    for (int i = 0; i < sample_count; i++) {
+        m_audio_buffer[m_buffer_write_pos] = buffer[i];
+        m_buffer_write_pos = (m_buffer_write_pos + 1) % m_audio_buffer.size();
+
+        // If buffer is full, overwrite oldest samples
+        if (m_buffer_write_pos == m_buffer_read_pos) {
+            m_buffer_read_pos = (m_buffer_read_pos + 1) % m_audio_buffer.size();
+        }
+    }
 }
 
 // SNES S-DSP MAME Device Implementation (Placeholder)

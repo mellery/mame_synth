@@ -51,11 +51,12 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
 ## Phase 7: NES Runtime Integration ⏳ IN PROGRESS
 34. **Fix MAME device initialization** ✅ - Resolved runtime NES APU device creation with lazy initialization approach
 35. **Complete machine_config integration** ✅ - Implemented running_machine and machine_config setup with full OSD support
-36. **Test NES playback with MAME backend** ⏳ - Verify end-to-end MIDI playback through real MAME NES APU
-37. **Update test suite for MAME integration** - Fix test compilation and runtime compatibility
-38. **Comprehensive verification** - Validate all NES features work with full MAME backend
-39. **Performance profiling** - Ensure MAME integration maintains sub-millisecond latency
-40. **Documentation update** - Document MAME integration architecture and troubleshooting
+36. **Implement MAME emulation loop integration** ⏳ - Use machine.run() to properly start devices; integrate MIDI playback with MAME's scheduler and exit when WAV export completes
+37. **Test NES playback with MAME backend** - Verify end-to-end MIDI playback through real MAME NES APU with proper device initialization
+38. **Update test suite for MAME integration** - Fix test compilation and runtime compatibility
+39. **Comprehensive verification** - Validate all NES features work with full MAME backend
+40. **Performance profiling** - Ensure MAME integration maintains sub-millisecond latency
+41. **Documentation update** - Document MAME integration architecture and troubleshooting
 
 ## Phase 8: Multi-Device Support (Future Expansion)
 41. **Implement SNES S-DSP wrapper class** - Replace silence stub with actual s_dsp_device integration
@@ -153,13 +154,16 @@ This approach leverages MAME's extensive collection of accurately emulated audio
 - **CLI Interface**: 50+ commands for complete interactive control and real-time parameter adjustment
 
 ### 🎯 Current Development Status:
-**Phase 7 In Progress**: MAME device initialization completed! The `mame_synth` binary successfully runs with full MAME NES APU device integration. Key achievements include:
-- ✅ Complete running_machine setup with OSD and UI manager support
-- ✅ Lazy device initialization avoiding full emulation loop complexity
-- ✅ Clean shutdown without segfaults or memory leaks
-- ✅ Binary execution verified with exit code 0
+**Phase 7 In Progress**: MAME runtime integration identified a critical architectural requirement. Key findings:
+- ✅ Complete running_machine and machine_config setup with OSD support
+- ✅ NES APU device successfully created and referenced
+- ⚠️ **Device Initialization Issue Identified**: MAME devices require `device_start()` to be called before accepting register writes
+- ⚠️ `device_start()` is protected and can only be called via `machine.run()` which enters MAME's emulation loop
+- 🔄 **Current Solution**: Need to integrate MIDI playback with MAME's scheduler inside `machine.run()` and exit when complete
 
-**Next Focus**: Testing end-to-end MIDI playback through the real MAME NES APU backend to verify audio output and register writes work correctly.
+**Root Cause**: The `nesapu_device::write()` method calls `m_stream->update()` on the first line, but `m_stream` is NULL until `device_start()` initializes it (called during `machine.run()`). "Lazy initialization" is not possible with MAME's device architecture.
+
+**Next Focus**: Implement MAME emulation loop integration - use `machine.run()` to properly start devices, run MIDI sequencer synchronized with MAME's scheduler, and call `machine.schedule_exit()` when WAV export completes.
 
 ## 🚀 Major Milestone Achieved: Full MAME Integration
 

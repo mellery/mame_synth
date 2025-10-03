@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <mutex>
+#include <thread>
+#include <atomic>
 
 // Forward declarations to avoid heavy MAME headers in our interface
 class nesapu_device;  // NES APU device
@@ -49,10 +52,15 @@ public:
     std::unique_ptr<class mame_audio_device_base> create_snes_dsp(
         const std::string& tag, uint32_t clock_rate);
 
+    // Audio callback interface - register a callback to receive mixed audio from MAME
+    using audio_callback_t = std::function<void(const int16_t*, int)>;
+    void set_audio_callback(audio_callback_t callback);
+
     // Internal - should not be used directly by client code
     minimal_machine_config* get_machine_config() { return m_machine_config; }
     machine_config* get_real_machine_config() { return m_real_machine_config.get(); }
     running_machine* get_running_machine() { return m_running_machine.get(); }
+    osd_interface* get_osd_interface() { return m_osd; }
     void register_device(device_t* device);
 
 private:
@@ -72,6 +80,9 @@ private:
     // Helper to setup minimal machine config needed for audio devices
     bool setup_machine_config();
     void cleanup_machine_config();
+
+    // Run MAME emulation loop with MIDI playback
+    int run_with_midi(const std::vector<uint8_t> &midi_events, uint32_t duration_ms);
 };
 
 /**
@@ -165,8 +176,15 @@ public:
 private:
     nesapu_device* m_apu = nullptr;      // NES APU device (owned by running_machine)
     void* m_sound_stream = nullptr;      // sound_stream* (opaque)
-    std::vector<int16_t> m_audio_buffer;
+    std::vector<int16_t> m_audio_buffer; // Ring buffer for audio samples
+    size_t m_buffer_write_pos = 0;       // Write position in ring buffer
+    size_t m_buffer_read_pos = 0;        // Read position in ring buffer
+    std::mutex m_buffer_mutex;           // Protect ring buffer access
     uint32_t m_sample_rate = 44100;
+
+    // Internal helper for OSD audio callback
+    void on_audio_callback(const int16_t* buffer, int sample_count);
+    friend class mame_machine_context;  // Allow machine context to call on_audio_callback
 };
 
 /**

@@ -68,7 +68,7 @@ bool nes_apu_device::initialize(uint32_t sample_rate) {
     // Set default APU register values
     m_pulse_duty[0] = 2; // 50% duty cycle
     m_pulse_duty[1] = 2;
-    m_triangle_linear = 0;
+    m_triangle_linear = 0xFF; // Enable triangle channel with maximum length
     m_noise_short_mode = false;
     m_master_volume = 0xFF;
 
@@ -371,17 +371,22 @@ void nes_apu_device::sync_to_mame_device() {
 
     // Sync triangle channel
     if (m_channels[2].active) {
+        std::cout << "SYNC: Triangle channel is active, writing registers..." << std::endl;
         // Linear counter register
         m_mame_device->write_register(0x08, m_triangle_linear);
+        std::cout << "SYNC: Wrote linear counter" << std::endl;
 
         // Timer low byte - use triangle-specific mapping
         uint16_t timer = m_note_mapper ?
             m_note_mapper->note_to_timer(m_channels[2].note_number, nes_note_mapping::nes_note_mapper::channel_type_t::TRIANGLE) :
             note_to_nes_frequency(m_channels[2].note_number);
+        std::cout << "SYNC: Timer value = " << timer << std::endl;
         m_mame_device->write_register(0x0A, timer & 0xFF);
+        std::cout << "SYNC: Wrote timer low" << std::endl;
 
         // Timer high byte with length counter
         m_mame_device->write_register(0x0B, (timer >> 8) | 0xF8);
+        std::cout << "SYNC: Wrote timer high" << std::endl;
     }
 
     // Sync noise channel

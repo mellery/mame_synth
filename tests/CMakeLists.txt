@@ -160,6 +160,12 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/emu/bookkeeping.cpp
     ${MAME_DIR}/src/osd/osdcore.cpp
     ${MAME_DIR}/src/osd/osdsync.cpp
+    ${MAME_DIR}/src/osd/strconv.cpp
+    # OSD modules (requires SDL2)
+    ${MAME_DIR}/src/osd/modules/lib/osdobj_common.cpp
+    ${MAME_DIR}/src/osd/modules/osdmodule.cpp
+    ${MAME_DIR}/src/osd/watchdog.cpp
+    ${MAME_DIR}/src/osd/modules/lib/osdlib_unix.cpp
     ${MAME_DIR}/src/emu/ioport.cpp
     # Utility libraries
     ${MAME_DIR}/src/lib/util/strformat.cpp
@@ -192,9 +198,15 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/lib/util/msdib.cpp
     ${MAME_DIR}/src/lib/util/wavwrite.cpp
     ${MAME_DIR}/src/lib/util/disasmintf.cpp
+    ${MAME_DIR}/src/lib/util/aviio.cpp
+    ${MAME_DIR}/src/lib/util/path_to_regex.cpp
+    ${MAME_DIR}/src/lib/util/zippath.cpp
     ${MAME_DIR}/src/osd/interface/inputseq.cpp
     ${MAME_DIR}/src/osd/modules/file/posixfile.cpp
     ${MAME_DIR}/src/osd/modules/file/posixdir.cpp
+    ${MAME_DIR}/src/osd/modules/file/posixptty.cpp
+    ${MAME_DIR}/src/osd/modules/file/posixsocket.cpp
+    ${MAME_DIR}/src/osd/modules/osdwindow.cpp
     # Memory system
     ${MAME_DIR}/src/emu/emumem_mview.cpp
     ${MAME_DIR}/src/emu/emumem_hedp.cpp
@@ -334,14 +346,32 @@ set(MAME_DEVICE_SOURCES
 set(EMULATOR_STUB_SOURCE
     ../src/mame_core/emulator_stub.cpp
     ../src/mame_core/debug_stub.cpp
-    ../src/mame_core/mame_stubs.cpp
+    # Removed mame_stubs.cpp - conflicts with real MAME OSD
     ../src/mame_core/softfloat_wrapper.cpp
     ../src/mame_core/audio_synth_driver.cpp
+    ../src/mame_core/nanosvg_impl.cpp
+    ${MAME_DIR}/build/generated/emu/layout/noscreens.cpp
 )
 
 set(OSD_STUB_SOURCES
-    ../src/mame_core/osd_stub.cpp
+    # Removed osd_stub.cpp - conflicts with real MAME OSD (osdlib_unix.cpp)
     ../src/mame_core/minimal_osd.cpp
+    ../src/mame_core/osd_stubs.cpp
+    # NOTE: Using real input.cpp from MAME, not input_stub.cpp
+    # MAME "none" module implementations - provide FONT_NONE, RENDERER_NONE, etc.
+    ${MAME_DIR}/src/osd/modules/debugger/none.cpp
+    ${MAME_DIR}/src/osd/modules/netdev/none.cpp
+    ${MAME_DIR}/src/osd/modules/midi/none.cpp
+    ${MAME_DIR}/src/osd/modules/render/drawnone.cpp
+    ${MAME_DIR}/src/osd/modules/font/font_none.cpp
+    ${MAME_DIR}/src/osd/modules/input/input_common.cpp
+    ${MAME_DIR}/src/osd/modules/input/input_none.cpp
+    ${MAME_DIR}/src/osd/modules/monitor/monitor_common.cpp
+    ${MAME_DIR}/src/osd/modules/output/none.cpp
+    ${MAME_DIR}/src/osd/modules/output/console.cpp
+    ${MAME_DIR}/src/osd/modules/output/network.cpp
+    ${MAME_DIR}/src/osd/modules/sound/none.cpp
+    ${MAME_DIR}/src/osd/modules/sound/sound_module.cpp
 )
 
 # Source files to test (exclude main.cpp)
@@ -351,6 +381,7 @@ set(LIB_SOURCES
     ../src/register_mapping.cpp
     ../src/mame_integration.cpp
     ../src/mame_core/mame_minimal.cpp
+    ../src/mame_core/minimal_osd.cpp
     # Removed: ../src/mame_core/minimal_nesapu.cpp (replaced with real MAME device)
     ../src/nes_note_mapping.cpp
     ../src/audio_stream.cpp
@@ -391,6 +422,7 @@ add_executable(mame_integration_tests
     test_mame_integration.cpp
     ../src/mame_integration.cpp
     ../src/mame_core/mame_minimal.cpp
+    ../src/mame_core/minimal_osd.cpp
     # Removed: ../src/mame_core/minimal_nesapu.cpp (replaced with real MAME device)
     ../src/nes_note_mapping.cpp
     ../src/audio_stream.cpp
@@ -421,6 +453,19 @@ target_include_directories(mame_integration_tests PRIVATE
 
 # Link compression, image, and threading libraries for mame_integration_tests
 target_link_libraries(mame_integration_tests z jpeg png pthread)
+
+# Find and link SDL2 (required by MAME OSD layer)
+pkg_check_modules(SDL2 sdl2)
+if(SDL2_FOUND)
+    target_include_directories(mame_synth_tests PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(mame_synth_tests ${SDL2_LIBRARIES})
+
+    target_include_directories(mame_integration_tests PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(mame_integration_tests ${SDL2_LIBRARIES})
+    message(STATUS "Found SDL2 for tests: ${SDL2_LIBRARIES}")
+else()
+    message(FATAL_ERROR "SDL2 not found - required for MAME OSD layer. Install with: sudo apt-get install libsdl2-dev")
+endif()
 
 # Link audio libraries to tests as well
 if(UNIX AND NOT APPLE)
