@@ -9,48 +9,7 @@
 // Video config global - required by osdwindow.cpp
 osd_video_config video_config;
 
-// Emulator info stubs - required by osdwindow.cpp
-const char * emulator_info::get_bare_build_version() {
-    return "MAME-Synth-0.1";
-}
-
-const char * emulator_info::get_build_version() {
-    return "MAME-Synth 0.1";
-}
-
-const char * emulator_info::get_appname() {
-    return "mame_synth";
-}
-
-bool emulator_info::standalone() {
-    return true;  // We're running standalone, not embedded
-}
-
-bool emulator_info::draw_user_interface(running_machine& machine) {
-    // No UI to draw in headless mode
-    return false;
-}
-
-bool emulator_info::frame_hook() {
-    // No per-frame hook needed
-    return false;
-}
-
-void emulator_info::periodic_check() {
-    // No periodic checks needed
-}
-
-void emulator_info::layout_script_cb(layout_file& file, const char* script) {
-    // No layout scripting needed
-}
-
-void emulator_info::display_ui_chooser(running_machine& machine) {
-    // No UI chooser in headless mode
-}
-
-void emulator_info::sound_hook(const std::map<std::string, std::vector<std::pair<const float*, int>>>& streams) {
-    // No sound hook needed
-}
+// NOTE: emulator_info functions are defined in emulator_stub.cpp - don't duplicate them here
 
 // Network handler stub
 namespace osd {
@@ -64,6 +23,9 @@ void hashfile_extrainfo(const char *hash_path, const game_driver& driver, const 
     // Not using software lists, so no extra info needed
     result.clear();
 }
+
+// NOTE: osd_uchar_from_osdchar is provided by mame/src/osd/strconv.cpp for main executable
+// For tests, we may need a stub version if strconv.cpp isn't included
 
 // Module registration stubs - these are referenced by osd_common_t but not actually used
 // We provide nullptr implementations so they register but don't instantiate
