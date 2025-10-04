@@ -341,6 +341,17 @@ void nes_sequencer::set_tempo_scale(double scale) {
     std::cout << "Tempo scale set to " << m_tempo_scale.load() << "x" << std::endl;
 }
 
+void nes_sequencer::set_sample_rate(uint32_t sample_rate) {
+    if (sample_rate >= 8000 && sample_rate <= 192000) {
+        m_config.sample_rate = sample_rate;
+        std::cout << "Sequencer sample rate updated to " << sample_rate << " Hz" << std::endl;
+    }
+}
+
+void nes_sequencer::set_target_sample_count(uint64_t count) {
+    m_config.target_sample_count = count;
+}
+
 void nes_sequencer::set_loop_enabled(bool enabled) {
     m_loop_enabled = enabled;
     if (enabled && m_loop_end == 0) {
@@ -495,6 +506,21 @@ void nes_sequencer::process_events() {
         return;
     }
 
+    // In offline rendering mode, check if we've reached the target sample count
+    if (m_config.offline_rendering && m_config.target_sample_count > 0) {
+        uint64_t current_samples = m_sample_count.load();
+        if (current_samples >= m_config.target_sample_count) {
+            // Reached target - stop playback
+            if (m_playback_state == playback_state::PLAYING) {
+                std::cout << "Offline rendering: Reached target sample count ("
+                          << current_samples << " >= " << m_config.target_sample_count
+                          << "), stopping playback" << std::endl;
+                stop();
+            }
+            return;
+        }
+    }
+
     // Get current time (wall-clock for real-time, sample-based for offline)
     auto current_time = std::chrono::steady_clock::now();
     music_time_t current_tick = real_time_to_tick(current_time);
@@ -557,6 +583,12 @@ void nes_sequencer::process_events() {
             should_process = (event.tick_time <= processing_tick);  // Use processing_tick with lookahead
         } else {
             should_process = (event.scheduled_time <= current_time);
+        }
+
+        // Debug: log decision
+        if (loop_iter < 10) {
+            fprintf(stderr, "LOOP_ITER #%d: tick=%d vs processing_tick=%d, offline=%d, should_process=%d\n",
+                loop_iter, event.tick_time, processing_tick, m_config.offline_rendering, should_process);
         }
 
         if (!should_process) {
@@ -775,6 +807,15 @@ music_time_t nes_sequencer::real_time_to_tick(sequencer_time_t time) const {
 
         auto microseconds_per_tick = static_cast<double>(m_microseconds_per_quarter.load()) /
                                      (m_tempo_scale.load() * m_config.ticks_per_quarter_note);
+
+        static int log_count = 0;
+        if (log_count < 5) {
+            fprintf(stderr, "real_time_to_tick: samples=%lu, sample_rate=%u, seconds=%.6f, uspq=%u, tpqn=%u, us_per_tick=%.6f, result=%u\n",
+                samples, m_config.sample_rate, seconds, m_microseconds_per_quarter.load(),
+                m_config.ticks_per_quarter_note, microseconds_per_tick,
+                static_cast<uint32_t>(microseconds / microseconds_per_tick));
+            log_count++;
+        }
 
         return static_cast<music_time_t>(microseconds / microseconds_per_tick);
     } else {

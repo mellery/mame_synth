@@ -1304,10 +1304,11 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Set the output filename
         export_stream->set_output_filename(filename);
 
-        // Enable offline rendering mode in sequencer for faster-than-realtime export
+        // Use REAL-TIME rendering for export (MAME requires real-time speed)
+        // Note: Export will take actual wall-clock time (7 seconds of music = 7 seconds to export)
         if (m_sequencer) {
-            m_sequencer->set_offline_rendering(true);
-            std::cout << "DEBUG: Offline rendering enabled, sample count reset to 0" << std::endl;
+            m_sequencer->set_offline_rendering(false);  // Real-time mode
+            std::cout << "Export: Using real-time rendering (required for MAME)" << std::endl;
         }
 
         // Note: Don't reset audio manager here as it clears necessary device state
@@ -1317,13 +1318,39 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             this->audio_callback(buffer, frames);
         });
 
-        // Set up pre-process callback to process events and advance sample count BEFORE audio generation
-        export_stream->set_pre_process_callback([this](size_t frames) {
+        // Set up pre-process callback to wait for MAME warmup before starting music
+        audio_stream* stream_ptr = export_stream.get();  // Get raw pointer for lambda capture
+        export_stream->set_pre_process_callback([this, stream_ptr](size_t frames) {
             if (m_sequencer) {
-                // Process events at current position first
+                // Wait for MAME to warm up before triggering notes
+                static bool warmup_waiting = false;
+                static bool warmup_complete_logged = false;
+
+                if (m_audio_manager && !m_audio_manager->is_mame_warmed_up()) {
+                    if (!warmup_waiting) {
+                        std::cout << "Export: Waiting for MAME warmup..." << std::endl;
+                        warmup_waiting = true;
+                    }
+                    // Don't process events during warmup
+                    return;
+                }
+
+                if (warmup_waiting && !warmup_complete_logged) {
+                    std::cout << "Export: MAME warmup complete, continuing music playback" << std::endl;
+                    warmup_complete_logged = true;
+                }
+
+                // Process events at current position (real-time based)
                 m_sequencer->process_events();
-                // Then advance sample count for next iteration
-                m_sequencer->advance_samples(static_cast<uint32_t>(frames));
+
+                // Check if sequencer finished playing
+                auto state = m_sequencer->get_playback_state();
+                if (state == nes_sequencer::playback_state::STOPPED ||
+                    state == nes_sequencer::playback_state::STOPPING) {
+                    std::cout << "Pre-process callback: Sequencer stopped, requesting audio stream stop" << std::endl;
+                    stream_ptr->request_stop();
+                    return;
+                }
             }
         });
 
@@ -1346,6 +1373,12 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Don't save original_stream since it's been properly stopped
         m_audio_stream = std::move(export_stream);
 
+        // CRITICAL: Update sequencer's sample rate to match export stream
+        // This ensures tick-to-sample calculations use the correct rate
+        if (m_sequencer) {
+            m_sequencer->set_sample_rate(sample_rate);
+        }
+
         // Calculate duration with tempo awareness
         music_time_t total_duration_ticks = 0;
         for (const auto& note : m_current_music.notes()) {
@@ -1358,8 +1391,8 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         // Use tempo-aware duration calculation
         double duration_seconds = calculate_tempo_aware_duration();
 
-        // Add a small buffer for audio processing completion
-        duration_seconds += 2.0;
+        // Add buffer for MAME warmup time (~2 seconds) plus audio completion
+        duration_seconds += 3.0;
 
         // Ensure reasonable bounds
         if (duration_seconds < 5.0) {
@@ -1369,8 +1402,8 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             duration_seconds = 3600.0;
         }
 
-        std::cout << "Export: total_duration=" << total_duration_ticks << " ticks, "
-                  << "calculated_duration=" << duration_seconds << " seconds" << std::endl;
+        std::cout << "Export: Real-time duration=" << duration_seconds << " seconds "
+                  << "(music=" << calculate_tempo_aware_duration() << "s + warmup=~2s + buffer=1s)" << std::endl;
 
         if (g_debug_config.log_export_process) {
             std::stringstream ss;
@@ -1393,8 +1426,10 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             return false;
         }
 
-        // Process initial events at tick 0 before any audio callbacks run
+        // Process initial events at tick 0 to kickstart MAME warmup
+        // MAME needs register writes to begin generating audio
         if (m_sequencer) {
+            std::cout << "Export: Triggering initial events to start MAME warmup" << std::endl;
             m_sequencer->process_events();
         }
 
@@ -1412,9 +1447,21 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
         }
 
         bool first_loop_iteration = true;
+        int loop_iteration_count = 0;
         while (true) {
+            loop_iteration_count++;
+
             // Check if sequencer has reached the end
             music_time_t current_position = m_sequencer ? m_sequencer->get_position() : 0;
+
+            // Debug log first few iterations
+            if (loop_iteration_count <= 5 || loop_iteration_count % 100 == 0) {
+                std::cout << "Export loop iteration " << loop_iteration_count
+                          << ": current_position=" << current_position
+                          << ", total_duration_ticks=" << total_duration_ticks
+                          << ", elapsed=" << std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::steady_clock::now() - start_time).count() << "s" << std::endl;
+            }
 
             // Debug log first iteration
             if (first_loop_iteration && g_debug_config.log_export_process) {

@@ -370,6 +370,16 @@ nes_enhanced_audio_manager::enhanced_stats nes_enhanced_audio_manager::get_enhan
     return stats;
 }
 
+bool nes_enhanced_audio_manager::is_mame_warmed_up() const {
+    // Check if any NES device with MAME backend has warmed up
+    for (const auto* nes_device : m_nes_devices) {
+        if (nes_device && nes_device->is_mame_warmed_up()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void nes_enhanced_audio_manager::update_device_lists() {
     m_nes_devices.clear();
     m_other_devices.clear();

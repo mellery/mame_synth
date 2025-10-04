@@ -148,6 +148,9 @@ public:
 
     device_t* get_mame_device() override;
 
+    // Warmup detection - returns true when MAME is generating audio
+    bool is_warmed_up() const { return m_warmup_complete; }
+
     // NES APU specific interface
     nesapu_device* get_nes_apu_device();
 
@@ -181,6 +184,7 @@ private:
     size_t m_buffer_read_pos = 0;        // Read position in ring buffer
     std::mutex m_buffer_mutex;           // Protect ring buffer access
     uint32_t m_sample_rate = 44100;
+    bool m_warmup_complete = false;      // True when MAME starts generating non-zero audio
 
     // Internal helper for OSD audio callback
     void on_audio_callback(const int16_t* buffer, int sample_count);

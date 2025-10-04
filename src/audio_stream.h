@@ -42,6 +42,9 @@ public:
     bool stop();
     void shutdown();
 
+    // Request stop from within audio thread (sets m_running to false)
+    void request_stop();
+
     // Audio source management
     void set_callback(audio_callback_t callback);
     void set_pre_process_callback(post_process_callback_t callback);   // For event processing before audio generation

@@ -180,13 +180,31 @@ bool nes_apu_device::stop_note(uint8_t channel, uint8_t note_number) {
         std::cout << "NES APU: Stopped note " << static_cast<int>(note_number)
                   << " on channel " << static_cast<int>(channel) << std::endl;
 
-        // Mark channel as inactive and sync to MAME device
+        // Silence the channel by setting volume to 0
+        m_channels[channel].volume = 0;
+
+        // Write volume=0 to hardware BEFORE marking inactive
+        if (m_mame_device) {
+            if (channel < 2) {
+                // Pulse channel - write control register with volume=0
+                uint8_t control_value = (m_pulse_duty[channel] << 6) | 0x30 | 0x00;  // volume=0
+                m_mame_device->write_register(channel * 4, control_value);
+                std::cout << "SYNC: Silenced pulse channel " << channel << " (volume=0)" << std::endl;
+            } else if (channel == 2) {
+                // Triangle channel - write linear counter=0 to silence
+                m_mame_device->write_register(0x08, 0x00);
+                std::cout << "SYNC: Silenced triangle channel (linear=0)" << std::endl;
+            } else if (channel == 3) {
+                // Noise channel - write control with volume=0
+                m_mame_device->write_register(0x0C, 0x30);  // halt + constant volume + vol=0
+                std::cout << "SYNC: Silenced noise channel (volume=0)" << std::endl;
+            }
+        }
+
+        // Now mark channel as inactive
         m_channels[channel].active = false;
         m_channels[channel].note_number = 0;
         m_channels[channel].velocity = 0;
-
-        // Sync the channel state to the MAME device
-        sync_to_mame_device();
 
         return true;
     }
@@ -300,7 +318,8 @@ void nes_apu_device::set_pulse_duty_cycle(uint8_t channel, uint8_t duty) {
 
     // Sync to MAME device
     if (m_mame_device) {
-        uint8_t control_value = 0x40 | (m_pulse_duty[channel] << 6) | m_channels[channel].volume;
+        // Set duty cycle + length counter halt + constant volume + volume
+        uint8_t control_value = (m_pulse_duty[channel] << 6) | 0x30 | m_channels[channel].volume;
         m_mame_device->write_register(channel * 4, control_value);
     }
 }
@@ -329,6 +348,16 @@ void nes_apu_device::set_noise_mode(bool short_mode) {
     }
 }
 
+bool nes_apu_device::is_mame_warmed_up() const {
+    if (m_mame_device) {
+        // Try to cast to MAME NES APU device to check warmup
+        if (auto* mame_nes = dynamic_cast<mame_nes_apu_device*>(m_mame_device.get())) {
+            return mame_nes->is_warmed_up();
+        }
+    }
+    return true; // Non-MAME devices are always "warmed up"
+}
+
 uint16_t nes_apu_device::note_to_nes_frequency(uint8_t note_number) const {
     // Use the enhanced NES note mapping system
     if (m_note_mapper) {
@@ -352,12 +381,28 @@ void nes_apu_device::sync_to_mame_device() {
         return;
     }
 
+    // Initialize frame counter once (disable IRQ, 5-step mode for longer envelopes)
+    static bool frame_counter_initialized = false;
+    if (!frame_counter_initialized) {
+        // $4017 bit 7: IRQ disable (1 = disabled)
+        // $4017 bit 6: Sequencer mode (1 = 5-step, 0 = 4-step)
+        // Using $C0 = disable IRQ + 5-step mode
+        m_mame_device->write_register(0x17, 0xC0);
+        std::cout << "SYNC: Initialized frame counter ($4017) = $C0 (5-step mode, IRQ disabled)" << std::endl;
+        frame_counter_initialized = true;
+    }
+
     // Sync pulse channels
     for (int i = 0; i < 2; ++i) {
         if (m_channels[i].active) {
             std::cout << "SYNC: Pulse channel " << i << " is active, writing registers..." << std::endl;
-            // Control register (duty cycle and volume)
-            uint8_t control_value = 0x40 | (m_pulse_duty[i] << 6) | m_channels[i].volume;
+            // Control register ($4000/$4004):
+            // Bits 7-6: Duty cycle (00=12.5%, 01=25%, 10=50%, 11=25% negated)
+            // Bit 5: Length counter halt flag (1=halt, prevents auto-silence)
+            // Bit 4: Constant volume flag (1=use volume directly, 0=use envelope)
+            // Bits 3-0: Volume (if bit 4=1) or envelope period (if bit 4=0)
+            uint8_t control_value = (m_pulse_duty[i] << 6) | 0x30 | m_channels[i].volume;
+            // 0x30 = bits 5 and 4 set = length counter halt + constant volume
             m_mame_device->write_register(i * 4, control_value);
             std::cout << "SYNC: Wrote control=$" << std::hex << (int)control_value << std::dec << std::endl;
 
@@ -378,21 +423,30 @@ void nes_apu_device::sync_to_mame_device() {
     // Sync triangle channel
     if (m_channels[2].active) {
         std::cout << "SYNC: Triangle channel is active, writing registers..." << std::endl;
-        // Linear counter register
-        m_mame_device->write_register(0x08, m_triangle_linear);
-        std::cout << "SYNC: Wrote linear counter" << std::endl;
 
-        // Timer low byte - use triangle-specific mapping
+        // Get timer value
         uint16_t timer = m_note_mapper ?
             m_note_mapper->note_to_timer(m_channels[2].note_number, nes_note_mapping::nes_note_mapper::channel_type_t::TRIANGLE) :
             note_to_nes_frequency(m_channels[2].note_number);
         std::cout << "SYNC: Timer value = " << timer << std::endl;
-        m_mame_device->write_register(0x0A, timer & 0xFF);
-        std::cout << "SYNC: Wrote timer low" << std::endl;
 
-        // Timer high byte with length counter
+        // CRITICAL ORDER: Must enable channel BEFORE writing $400B!
+        // Write status first to enable triangle
+        m_mame_device->write_register(0x15, 0x0F);  // Enable all channels
+        std::cout << "SYNC: Enabled triangle in $4015 (BEFORE other writes)" << std::endl;
+
+        // Write triangle registers
+        // 1. Write linear counter with HALT bit set (prevents length counter from decrementing)
+        m_mame_device->write_register(0x08, 0xFF);  // Bit 7=1 halt, bits 6-0=$7F (max)
+        std::cout << "SYNC: Wrote linear counter = $FF" << std::endl;
+
+        // 2. Write timer low
+        m_mame_device->write_register(0x0A, timer & 0xFF);
+        std::cout << "SYNC: Wrote timer low = $" << std::hex << (timer & 0xFF) << std::dec << std::endl;
+
+        // 3. Write timer high + length counter load (TRIGGERS linear counter reload if enabled!)
         m_mame_device->write_register(0x0B, (timer >> 8) | 0xF8);
-        std::cout << "SYNC: Wrote timer high" << std::endl;
+        std::cout << "SYNC: Wrote timer high = $" << std::hex << ((timer >> 8) | 0xF8) << std::dec << " (triggers reload)" << std::endl;
     }
 
     // Sync noise channel
@@ -420,11 +474,16 @@ void nes_apu_device::sync_to_mame_device() {
         std::cout << "SYNC: Wrote noise length counter" << std::endl;
     }
 
-    // Enable all active channels
+    // Enable channels (CRITICAL: NEVER write 0 to disable, or it zeros linear_length!)
+    // Instead, we keep channels enabled and control volume to mute them
     uint8_t status = 0;
     for (int i = 0; i < 4; ++i) {
         if (m_channels[i].active && !m_channels[i].muted) {
             status |= (1 << i);
+        } else {
+            // Keep channel enabled in hardware but it will be silent (volume=0 written above)
+            // This prevents linear_length from being zeroed on triangle channel
+            status |= (1 << i);  // Always enable
         }
     }
 
@@ -432,10 +491,7 @@ void nes_apu_device::sync_to_mame_device() {
     static int debug_sync_count = 0;
     if (debug_sync_count < 10) {
         std::cout << "SYNC: Setting status=$" << std::hex << (int)status << std::dec
-                  << " (P0=" << (status & 1 ? '1' : '0')
-                  << " P1=" << (status & 2 ? '1' : '0')
-                  << " T=" << (status & 4 ? '1' : '0')
-                  << " N=" << (status & 8 ? '1' : '0') << ")" << std::endl;
+                  << " (keeping all channels enabled to prevent counter reset)" << std::endl;
         debug_sync_count++;
     }
 

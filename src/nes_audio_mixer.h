@@ -161,6 +161,9 @@ public:
     void set_mixing_mode(bool nes_focused_mode);
     bool is_nes_focused_mode() const { return m_nes_focused_mode; }
 
+    // MAME warmup detection
+    bool is_mame_warmed_up() const;
+
     // Statistics
     struct enhanced_stats {
         nes_audio_mixer::mixer_stats nes_mixer_stats;

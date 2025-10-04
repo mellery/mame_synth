@@ -112,6 +112,7 @@ public:
         bool enable_threading;              // Use separate thread for sequencing
         uint32_t lookahead_ms;              // Event scheduling lookahead time
         bool offline_rendering;             // Use sample-based time instead of wall-clock time
+        uint64_t target_sample_count;       // For offline rendering: stop after this many samples (0 = unlimited)
 
         sequencer_config()
             : sample_rate(44100)
@@ -120,7 +121,8 @@ public:
             , enable_looping(false)
             , enable_threading(true)
             , lookahead_ms(100)
-            , offline_rendering(false) {}
+            , offline_rendering(false)
+            , target_sample_count(0) {}
     };
 
     // Playback state
@@ -164,6 +166,12 @@ public:
 
     void set_tempo_scale(double scale); // 1.0 = normal, 2.0 = double speed, 0.5 = half speed
     double get_tempo_scale() const { return m_tempo_scale; }
+
+    void set_sample_rate(uint32_t sample_rate); // Update sample rate for timing calculations
+    uint32_t get_sample_rate() const { return m_config.sample_rate; }
+
+    void set_target_sample_count(uint64_t count); // Set target sample count for offline rendering
+    uint64_t get_target_sample_count() const { return m_config.target_sample_count; }
 
     void set_loop_enabled(bool enabled);
     bool is_loop_enabled() const { return m_loop_enabled; }

@@ -33,7 +33,7 @@ struct debug_config {
     // Timing and Sequencing
     bool log_timing_info = false;          // Log sequencer timing and synchronization
     bool log_playback_engine = false;      // Log playback engine state transitions
-    bool log_export_process = false;       // Log WAV export process details
+    bool log_export_process = true;        // Log WAV export process details
 
     // File Operations
     bool log_wav_export = false;           // Log WAV file export operations

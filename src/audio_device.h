@@ -89,6 +89,9 @@ public:
     void set_triangle_linear_counter(uint8_t value);
     void set_noise_mode(bool short_mode); // true for short (93-bit), false for long (32767-bit)
 
+    // MAME backend access
+    bool is_mame_warmed_up() const;
+
 private:
     struct channel_state {
         bool active = false;

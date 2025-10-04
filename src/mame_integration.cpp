@@ -470,14 +470,34 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
         return;
     }
 
-    // MAME's sound system generates audio automatically when:
-    // 1. Registers are written (which we do in write_register)
-    // 2. The sound_manager's timer fires periodically
-    // 3. The OSD callback receives the mixed audio
-    //
-    // For now, read from the ring buffer that gets filled by the OSD callback
+    // **NEW APPROACH**: Drive MAME scheduler on-demand to generate audio
+    // Calculate how much emulated time we need for the requested samples
+    // 1024 samples @ 44.1kHz = 23.22ms, NES frame @ 60Hz = 16.67ms
+    // We need ~1.4 frames per audio buffer, so call timeslice() twice
 
-    // Read samples from ring buffer
+    if (m_machine_context && m_machine_context->get_running_machine()) {
+        running_machine* machine = m_machine_context->get_running_machine();
+
+        // Calculate frames needed (conservative estimate: 2 frames for 1024 samples)
+        double real_time_ms = (sample_count / 44100.0) * 1000.0;  // Time represented by samples
+        int frames_needed = (int)std::ceil(real_time_ms / 16.67);  // NES frames @ 60Hz
+
+        static int scheduler_call_count = 0;
+        if (scheduler_call_count < 5) {
+            std::cout << "SCHEDULER: Calling timeslice() " << frames_needed
+                      << " times for " << sample_count << " samples ("
+                      << real_time_ms << "ms)" << std::endl;
+        }
+
+        // Drive MAME scheduler to generate audio
+        for (int i = 0; i < frames_needed; i++) {
+            machine->scheduler().timeslice();
+        }
+
+        scheduler_call_count++;
+    }
+
+    // Read samples from ring buffer (filled by OSD callback during timeslice())
     std::lock_guard<std::mutex> lock(m_buffer_mutex);
 
     size_t samples_available = 0;
@@ -500,10 +520,9 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
         std::memset(buffer + samples_to_copy, 0, (sample_count - samples_to_copy) * sizeof(int16_t));
     }
 
-    // DEBUG: Check what MAME is generating
+    // DEBUG: Check what MAME is generating and track warmup
     static int call_count = 0;
-    static bool found_mame_audio = false;
-    if (!found_mame_audio && call_count < 10000) {
+    if (!m_warmup_complete && call_count < 10000) {
         int16_t max_val = 0;
         int max_idx = 0;
         for (size_t i = 0; i < sample_count; i++) {
@@ -517,8 +536,9 @@ void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_cou
                       << " at idx=" << max_idx
                       << ", first_5=[" << buffer[0] << "," << buffer[1] << ","
                       << buffer[2] << "," << buffer[3] << "," << buffer[4] << "]" << std::endl;
-            if (abs(max_val) > 3000) {
-                found_mame_audio = true;
+            if (abs(max_val) > 1000) {
+                m_warmup_complete = true;
+                std::cout << "MAME warmup complete at call " << call_count << " (max=" << max_val << ")" << std::endl;
                 std::cout << "*** MAME FIRST AUDIO AT CALL " << call_count << ", sample " << (call_count * sample_count + max_idx) << " ***" << std::endl;
             }
         }

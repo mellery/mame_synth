@@ -51,7 +51,7 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
 ## Phase 7: NES Runtime Integration ⏳ IN PROGRESS
 34. **Fix MAME device initialization** ✅ - Resolved runtime NES APU device creation with lazy initialization approach
 35. **Complete machine_config integration** ✅ - Implemented running_machine and machine_config setup with full OSD support
-36. **Implement MAME emulation loop integration** ✅ - machine.run() starts devices correctly; MIDI playback integrated with MAME scheduler; WAV export working
+36. **Implement MAME emulation loop integration** ⚠️ BLOCKED - machine.run() background thread stops after 10 frames; requires architectural change
 37. **Test NES playback with MAME backend** ✅ - End-to-end MIDI playback verified through real MAME NES APU with proper audio output
 38. **Audio pipeline debugging and fixes** ✅ - Fixed multiple critical bugs in audio generation pipeline:
     - Fixed APU sample rate bug (447kHz → 44.1kHz) in nes_apu.cpp
@@ -60,14 +60,20 @@ A git project that uses MAME as a submodule to play MIDI/MusicXML files through 
     - Fixed event priority: NOTE_ON now processes before NOTE_OFF at same tick
     - Fixed MIDI parser: Implemented proper NOTE_ON/NOTE_OFF tracking for accurate durations (was hardcoded to 480 ticks)
     - Fixed Noise channel: Added constant volume flag ($30) to control register
-39. **Sequencer architecture issues** ⏳ - Remaining issues in event scheduling system:
-    - Duplicate events being added (generate_events vs schedule_events conflict)
-    - Offline mode process_events() compatibility issues
-    - Export hanging in infinite loop (needs architectural refactoring)
-40. **Comprehensive verification** ⏳ - Validate all 5 NES channels work with full MAME backend (audio confirmed working, need clean test)
-41. **Update test suite for MAME integration** ⏳ - Fix test compilation and runtime compatibility (in progress)
-42. **Performance profiling** - Ensure MAME integration maintains sub-millisecond latency
-43. **Documentation update** ✅ - MAME integration architecture documented in roadmap
+39. **MAME thread architecture issue** ✅ DIAGNOSED - Root cause identified:
+    - MAME machine.run() background thread stops after 10 frames (~167ms)
+    - MAME designed for real-time emulation loop, not detached background thread
+    - Export produces 99.8% silence due to MAME thread stalling
+    - Real-time export also fails (same issue)
+40. **Refactor MAME integration: On-demand scheduler** ⏳ IN PROGRESS - Replace background thread with manual scheduler calls:
+    - Remove machine.run() background thread approach
+    - Call machine.scheduler().timeslice() from audio callback
+    - Generate audio on-demand when needed
+    - Follow MAmidiMEmo's proven architecture pattern
+41. **Comprehensive verification** ⏳ - Validate all 5 NES channels work with refactored architecture
+42. **Update test suite for MAME integration** ⏳ - Fix test compilation and runtime compatibility (in progress)
+43. **Performance profiling** - Ensure MAME integration maintains sub-millisecond latency
+44. **Documentation update** ✅ - MAME integration architecture documented in roadmap
 
 ## Phase 8: Multi-Device Support (Future Expansion)
 41. **Implement SNES S-DSP wrapper class** - Replace silence stub with actual s_dsp_device integration

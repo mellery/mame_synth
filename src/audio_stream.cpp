@@ -89,6 +89,12 @@ bool audio_stream::start() {
     return true;
 }
 
+void audio_stream::request_stop() {
+    // Can be called from within the audio thread to signal stop
+    std::cout << "Audio stream: Stop requested from audio thread" << std::endl;
+    m_running = false;
+}
+
 bool audio_stream::stop() {
     if (!m_running) {
         return true;
@@ -403,6 +409,15 @@ void audio_stream::shutdown_file_output() {
 
 void audio_stream::write_frames_to_file(const int16_t* buffer, size_t frames) {
     if (m_file_writer) {
+        static size_t write_call_count = 0;
+        write_call_count++;
+
+        // Log first 20 calls and every 1000th call to track writes
+        if (write_call_count <= 20 || write_call_count % 1000 == 0) {
+            std::cout << "write_to_file #" << write_call_count
+                      << ": frames=" << frames << std::endl;
+        }
+
         if (g_debug_config.log_audio_buffers) {
             // Check if buffer contains non-silent audio
             bool has_audio = false;
