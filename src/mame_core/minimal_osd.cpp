@@ -1,146 +1,277 @@
 // Minimal OSD implementation for MAME audio-only operation
 #include "emu.h"
 #include "minimal_osd.h"
-#include "main.h"                        // For machine_manager
-#include "http.h"                        // For http_manager
-#include "ui/uimain.h"                   // For ui_manager
+#include "main.h"
+#include "http.h"  // For http_manager
+#include "ui/uimain.h"  // For ui_manager
+#include "synth_modules.h"  // Custom OSD modules
+#include "modules/osdmodule.h"
+#include "modules/sound/sound_module.h"  // For sound_module
 #include <iostream>
 
-// Constructor
-minimal_osd_interface::minimal_osd_interface(osd_options &options)
-    : m_options(options)
-    , m_machine(nullptr)
-    , m_audio_callback(nullptr)
-    , m_verbose(false)
-    , m_audio_generation(1)
-    , m_sink_stream_id(0)
-{
-}
+// Force linker to include SOUND_CAPTURE module
+extern const module_type SOUND_CAPTURE;
+static const module_type *force_sound_capture_link = &SOUND_CAPTURE;
 
-// Initialize OSD with running machine
-void minimal_osd_interface::init(running_machine &machine) {
-    m_machine = &machine;
-    std::cout << "Minimal OSD initialized with running_machine" << std::endl;
-
-    // Trigger sound system initialization
-    std::cout << "  Triggering sound system setup..." << std::endl;
-    machine.sound();  // This should trigger sound_get_information() call
-}
-
-// Return audio information
-osd::audio_info minimal_osd_interface::sound_get_information() {
-    std::cout << "OSD: sound_get_information() called - setting up audio nodes" << std::endl;
-
-    osd::audio_info info;
-    info.m_generation = m_audio_generation;
-    info.m_default_sink = 1;
-    info.m_default_source = 0;
-
-    // Return a single stereo output sink
-    osd::audio_info::node_info sink;
-    sink.m_id = 1;
-    sink.m_name = "audio_output";
-    sink.m_display_name = "Audio Output";
-    sink.m_sinks = 2; // 2 channels (stereo)
-    sink.m_sources = 0;
-    sink.m_rate.m_default_rate = 44100;
-    sink.m_rate.m_min_rate = 44100;
-    sink.m_rate.m_max_rate = 48000;
-    info.m_nodes.push_back(sink);
-
-    std::cout << "OSD: Configured " << info.m_nodes.size() << " audio nodes" << std::endl;
-    return info;
-}
-
-// Open audio sink stream
-uint32_t minimal_osd_interface::sound_stream_sink_open(uint32_t node, std::string name, uint32_t rate) {
-    m_sink_stream_id++;
-    std::cout << "OSD: Opened audio sink stream #" << m_sink_stream_id
-              << " (node=" << node << ", name=" << name << ", rate=" << rate << ")" << std::endl;
-    return m_sink_stream_id;
-}
-
-// Return slider list - implemented inline in header to avoid needing menu.h here
-
-// Audio callback - MAME's sound_manager calls this with mixed audio
-void minimal_osd_interface::sound_stream_sink_update(uint32_t id, const int16_t *buffer, int samples_this_frame) {
-    // Forward the audio to our callback if one is registered
-    if (m_audio_callback) {
-        m_audio_callback(buffer, samples_this_frame);
-    }
-
-    // Debug output for first few callbacks
-    static int callback_count = 0;
-    if (callback_count < 5) {
-        std::cout << "OSD: Audio callback #" << callback_count
-                  << " - stream_id=" << id << ", samples=" << samples_this_frame << std::endl;
-        callback_count++;
-    }
-}
-
-// Minimal machine manager implementation for audio-only operation
-class minimal_mame_manager : public machine_manager
+// Minimal UI manager for audio-only operation - all methods are stubs
+class minimal_ui_manager : public ui_manager
 {
 public:
-    minimal_mame_manager(emu_options &options, osd_interface &osd)
-        : machine_manager(options, osd)
-    {
-        // Initialize http_manager with inactive state (active=false)
-        // This prevents null pointer crashes but doesn't actually start HTTP server
-        m_http = std::make_unique<http_manager>(false, 0, "");
-    }
+    minimal_ui_manager(running_machine &machine) : ui_manager(machine) {}
+    virtual ~minimal_ui_manager() = default;
 
-    virtual ~minimal_mame_manager() = default;
-
-    // Override create_ui to provide minimal UI manager
-    virtual ui_manager* create_ui(running_machine& machine) override {
-        // Create a minimal UI manager and transfer ownership to the machine
-        // The machine's m_ui member will own this pointer
-        auto *ui = new ui_manager(machine);
-        return ui;
+    // Override set_startup_text to avoid crashes - just ignore it
+    virtual void set_startup_text(const char *text, bool force) override {
+        // Silently ignore startup text in headless mode
     }
 };
 
-// Factory function to create minimal machine manager
+// Minimal OSD implementation - inherits from osd_common_t
+minimal_osd_interface::minimal_osd_interface(osd_options &options)
+    : osd_common_t(options)
+    , m_audio_callback(nullptr)
+{
+    std::cout << "Minimal OSD interface created (based on osd_common_t)" << std::endl;
+}
+
+minimal_osd_interface::~minimal_osd_interface() {
+    std::cout << "Minimal OSD interface destroyed" << std::endl;
+}
+
+// sound_stream_sink_update implementation moved below with other sound method overrides
+
+// Override init to set default options before parent initialization
+void minimal_osd_interface::init(running_machine &machine) {
+    std::cout << "Minimal OSD: init() - setting default options..." << std::endl;
+
+    // Don't set any sound module - our OSD overrides handle audio directly
+    // This allows our sound_get_information() override to be called
+    const char* sound_option = machine.options().value(OSD_SOUND_PROVIDER);
+    std::cout << "  Current sound option: " << (sound_option ? sound_option : "<null>") << std::endl;
+    std::cout << "  Using direct OSD audio overrides (no sound module)" << std::endl;
+
+    // Call parent init which will call init_subsystems()
+    osd_common_t::init(machine);
+
+    std::cout << "Minimal OSD: init() completed" << std::endl;
+}
+
+// Override subsystem initialization to disable unnecessary modules
+void minimal_osd_interface::init_subsystems() {
+    std::cout << "Minimal OSD: Initializing subsystems (audio-only mode)" << std::endl;
+
+    // Call parent but we'll skip video/input by overriding video_init() and window_init()
+    osd_common_t::init_subsystems();
+
+    // Check if sound module was initialized
+    if (m_sound) {
+        std::cout << "Minimal OSD: Sound module initialized successfully" << std::endl;
+    } else {
+        std::cout << "Minimal OSD: WARNING - Sound module is NULL!" << std::endl;
+    }
+
+    std::cout << "Minimal OSD: Subsystems initialized" << std::endl;
+}
+
+// Minimal machine manager for audio-only operation - no UI, no HTTP server, no plugins
+class minimal_machine_manager : public machine_manager
+{
+public:
+    minimal_machine_manager(emu_options &options, osd_interface &osd)
+        : machine_manager(options, osd)
+    {
+        // Initialize base class m_http with inactive state (active=false) to avoid crashes
+        // http_manager::clear() is called by machine.run() and expects non-null pointer
+        // m_http is protected member of machine_manager base class
+        m_http = std::make_unique<http_manager>(false, 0, "");
+        std::cout << "Minimal machine manager created (no UI/HTTP/plugins)" << std::endl;
+    }
+
+    virtual ~minimal_machine_manager() = default;
+
+    // Override create_ui to return our minimal UI manager
+    virtual ui_manager* create_ui(running_machine& machine) override {
+        return new minimal_ui_manager(machine);
+    }
+};
+
+// Factory function to create machine manager
 machine_manager* create_minimal_machine_manager(emu_options &options, osd_interface &osd) {
-    return new minimal_mame_manager(options, osd);
+    return new minimal_machine_manager(options, osd);
 }
 
-// Cleanup functions for protected-destructor classes
+// Cleanup function for osd_interface (which has protected destructor)
 void destroy_minimal_osd_interface(osd_interface* osd) {
-    if (osd) {
-        delete static_cast<minimal_osd_interface*>(osd);
+    // Cast to our concrete type which has public destructor
+    delete static_cast<minimal_osd_interface*>(osd);
+}
+
+// Override video/window subsystem methods to skip video entirely (audio-only mode)
+bool minimal_osd_interface::video_init() {
+    std::cout << "Minimal OSD: Skipping video initialization (audio-only mode)" << std::endl;
+    return true;  // Return success without actually initializing video
+}
+
+bool minimal_osd_interface::window_init() {
+    std::cout << "Minimal OSD: Skipping window initialization (audio-only mode)" << std::endl;
+    return true;  // Return success without actually creating windows
+}
+
+void minimal_osd_interface::video_exit() {
+    // Nothing to clean up - we never initialized video
+}
+
+void minimal_osd_interface::window_exit() {
+    // Nothing to clean up - we never created windows
+}
+
+void minimal_osd_interface::osd_exit() {
+    std::cout << "Minimal OSD: Exiting OSD subsystem" << std::endl;
+    // Call parent cleanup if needed
+    osd_common_t::osd_exit();
+}
+
+// Override input methods (not needed for audio-only operation)
+void minimal_osd_interface::input_update(bool relative_reset) {
+    // No input processing needed for audio-only mode
+}
+
+void minimal_osd_interface::check_osd_inputs() {
+    // No OSD inputs to check in audio-only mode
+}
+
+// Override event processing methods (not needed for audio-only operation)
+void minimal_osd_interface::process_events() {
+    // No events to process in headless audio-only mode
+}
+
+bool minimal_osd_interface::has_focus() const {
+    // Always return true - we're running headless so we always have "focus"
+    return true;
+}
+
+// Override sound_get_generation() - return static generation number
+uint32_t minimal_osd_interface::sound_get_generation() {
+    return 1;  // Static generation - our audio config never changes
+}
+
+// Override sound_get_information() to provide audio_info with sink nodes
+// This is required for newer MAME API - MAmidiMEmo uses older MAME with simpler update_audio_stream()
+osd::audio_info minimal_osd_interface::sound_get_information() {
+    std::cout << "!!! minimal_osd sound_get_information() called !!!" << std::endl;
+
+    osd::audio_info result;
+    result.m_generation = 1;
+
+    // Create a MONO sink node - this tells MAME to create m_osd_output_streams
+    // CRITICAL: Must match speaker configuration (we use MONO speaker like MAmidiMEmo)
+    osd::audio_info::node_info sink_node;
+    sink_node.m_name = "default";
+    sink_node.m_display_name = "Audio Capture Sink";
+    sink_node.m_id = 1;  // IMPORTANT: Node IDs are 1-based in MAME!
+
+    // Audio rate range - default to 48000Hz for NES APU
+    sink_node.m_rate.m_default_rate = 48000;
+    sink_node.m_rate.m_min_rate = 8000;
+    sink_node.m_rate.m_max_rate = 96000;
+
+    sink_node.m_sinks = 1;  // MONO (matches our MONO speaker)
+    sink_node.m_sources = 0;  // No inputs
+    sink_node.m_port_names.push_back("Mono");
+    sink_node.m_port_positions.push_back(osd::channel_position::FC());  // Front Center
+
+    result.m_nodes.push_back(sink_node);
+    result.m_default_sink = 1;  // Match the node ID
+    result.m_default_source = 0;
+
+    std::cout << "!!! Returning audio_info with " << result.m_nodes.size() << " nodes !!!" << std::endl;
+    if (!result.m_nodes.empty()) {
+        auto &node = result.m_nodes[0];
+        std::cout << "    Node 0: id=" << node.m_id
+                  << ", name=" << node.m_name
+                  << ", sinks=" << node.m_sinks
+                  << ", sources=" << node.m_sources
+                  << ", rate=" << node.m_rate.m_default_rate << std::endl;
+    }
+
+    return result;
+}
+
+// Override sound_stream_sink_open to create OSD output streams
+uint32_t minimal_osd_interface::sound_stream_sink_open(uint32_t node, std::string name, uint32_t rate) {
+    static uint32_t next_stream_id = 1;
+    uint32_t stream_id = next_stream_id++;
+
+    std::cout << "!!! sound_stream_sink_open: node=" << node
+              << ", name=" << name
+              << ", rate=" << rate
+              << " -> stream_id=" << stream_id << " !!!" << std::endl;
+
+    return stream_id;
+}
+
+// Override sound_stream_sink_update - THIS IS WHERE WE GET AUDIO!
+void minimal_osd_interface::sound_stream_sink_update(uint32_t id, const int16_t *buffer, int samples_this_frame) {
+    static int callback_count = 0;
+
+    // Debug: Check first few callbacks to verify we're getting real audio
+    if (callback_count < 10) {
+        // Check max sample value in REAL buffer from MAME
+        int16_t max_sample = 0;
+        for (int i = 0; i < samples_this_frame; i++) {
+            if (std::abs(buffer[i]) > std::abs(max_sample)) {
+                max_sample = buffer[i];
+            }
+        }
+        std::cerr << "!!! OSD_CALLBACK #" << callback_count
+                  << " id=" << id << " samples=" << samples_this_frame
+                  << " max=" << max_sample << " (REAL MAME APU) !!!" << std::endl;
+        callback_count++;
+    }
+
+    // Forward REAL APU audio to our registered callback
+    if (m_audio_callback) {
+        m_audio_callback(buffer, samples_this_frame);
     }
 }
 
-// Helper to manually initialize devices without calling full run()
-// This calls the necessary internal methods to set up the sound subsystem
-void minimal_initialize_sound_devices(running_machine &machine) {
-    // This function needs access to private methods of running_machine
-    // Fortunately, we can use the public sound() accessor and call device start methods
-    // through the device interface
+// Override sound_stream_close
+void minimal_osd_interface::sound_stream_close(uint32_t id) {
+    std::cout << "sound_stream_close: id=" << id << std::endl;
+}
 
-    //  The key is that device initialization happens through these calls:
-    // 1. sound_manager is lazy-created by sound() accessor
-    // 2. before_devices_init() prepares sound system
-    // 3. Each device's start() is called (but this is protected)
-    // 4. after_devices_init() finalizes sound system
+// Override sound_external_per_channel_volume - we don't support per-channel volume
+bool minimal_osd_interface::sound_external_per_channel_volume() {
+    return false;
+}
 
-    // Get or create sound manager
-    sound_manager &snd = machine.sound();
+// Override sound_split_streams_per_source - we use single streams
+bool minimal_osd_interface::sound_split_streams_per_source() {
+    return false;
+}
 
-    // Initialize sound subsystem
-    snd.before_devices_init();
+// Override sound_stream_source_open - we don't use source streams (input)
+uint32_t minimal_osd_interface::sound_stream_source_open(uint32_t node, std::string name, uint32_t rate) {
+    std::cout << "sound_stream_source_open: node=" << node << ", name=" << name << " (not supported)" << std::endl;
+    return 0;  // Return 0 = not supported
+}
 
-    // We can't call start_all_devices() as it's private
-    // Instead, let's trigger device initialization through device_reset() which is public
-    // This should cause the device to initialize its internal state
-    std::cout << "Initializing MAME devices through reset..." << std::endl;
-    for (device_t &device : device_enumerator(machine.root_device())) {
-        std::cout << "  Resetting device: " << device.tag() << std::endl;
-        device.reset();
-    }
-    std::cout << "MAME devices initialized" << std::endl;
+// Override sound_stream_set_volumes - stub (we handle volume elsewhere)
+void minimal_osd_interface::sound_stream_set_volumes(uint32_t id, const std::vector<float> &db) {
+    // Ignore for now
+}
 
-    snd.after_devices_init();
+// Override sound_stream_source_update - we don't use source streams
+void minimal_osd_interface::sound_stream_source_update(uint32_t id, int16_t *buffer, int samples_this_frame) {
+    // Not used - we only have sinks (output), not sources (input)
+}
+
+// Override sound_begin_update - called before audio updates
+void minimal_osd_interface::sound_begin_update() {
+    // Nothing to do
+}
+
+// Override sound_end_update - called after audio updates
+void minimal_osd_interface::sound_end_update() {
+    // Nothing to do
 }

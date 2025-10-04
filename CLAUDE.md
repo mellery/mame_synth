@@ -7,10 +7,11 @@ A production-ready NES synthesizer built on top of MAME's accurate audio device 
 This synthesizer provides:
 - **Hardware-accurate NES APU emulation** using MAME's audio devices
 - **Real-time MIDI playback** with intelligent channel assignment
-- **Cross-platform audio output** (ALSA/DirectSound/file output)
+- **Cross-platform audio output** via MAME's OSD (Operating System Dependent) layer
 - **Interactive CLI interface** with real-time parameter control
 - **Comprehensive configuration management** with presets and validation
 - **Production-ready performance** with sub-millisecond latency
+- **Proper OSD integration** with MAME's module system for audio, video, and input
 
 ## Quick Start
 
@@ -141,6 +142,13 @@ ctest
    - MAME device abstraction and lifecycle management
    - NES APU wrapper with hardware-accurate emulation
    - Factory pattern for device instantiation
+   - OSD (Operating System Dependent) layer integration
+
+2a. **MAME OSD Integration** (`src/mame_core/minimal_osd.cpp`, `src/mame_core/minimal_osd.h`)
+   - Inherits from `osd_common_t` for proper MAME integration
+   - Implements OSD module system (audio, video, input)
+   - Captures audio via `sound_stream_sink_update()` callback
+   - Minimal UI manager and machine manager for audio-focused operation
 
 3. **Register Mapping System** (`src/register_mapping.cpp`, `src/nes_note_mapping.cpp`)
    - MIDI note to device register translation
@@ -183,7 +191,11 @@ src/
 ├── audio_device.{cpp,h}          # Audio device abstraction layer
 ├── audio_stream.{cpp,h}          # Real-time audio streaming
 ├── mame_integration.{cpp,h}      # MAME device integration
-├── mame_core/                    # Minimal MAME core integration
+├── mame_core/                    # MAME OSD and core integration
+│   ├── minimal_osd.{cpp,h}      # OSD implementation (inherits osd_common_t)
+│   ├── audio_synth_driver.cpp   # MAME driver for audio synthesizer
+│   ├── *_stub.cpp               # Minimal stubs for unused MAME subsystems
+│   └── softfloat_wrapper.cpp    # C/C++ linkage compatibility
 ├── music_parser.{cpp,h}          # MIDI/MusicXML parsing
 ├── nes_*.{cpp,h}                # NES-specific components
 └── register_mapping.{cpp,h}     # Note-to-register mapping
@@ -216,20 +228,27 @@ make clean && make  # Full rebuild with all warnings enabled
 
 ### MAME Integration
 
-The project uses a comprehensive MAME integration approach:
-- MAME audio devices with full subsystem support (60+ source files)
-- MAME is included as a git submodule
-- Minimal stubs in `src/mame_core/` for unused subsystems (video, network, debugging)
-- Direct integration with MAME's audio, memory, and device subsystems
-- Custom wrappers for C/C++ linkage compatibility (softfloat)
+The project uses a comprehensive MAME integration approach following MAmidiMEmo's architecture:
+- **Full OSD Integration**: Inherits from `osd_common_t` for proper MAME module system support
+- **OSD Modules**: Initializes sound, video, input, and other OSD modules as needed
+- **Audio Capture**: Captures audio via `sound_stream_sink_update()` callback from `osd_common_t`
+- **Machine Manager**: Custom `minimal_machine_manager` with http_manager and ui_manager
+- **Driver System**: Custom `audiosynth` driver with RP2A03 CPU and screen device for timing
+- **MAME Submodule**: MAME included as git submodule (60+ source files compiled)
 
-**MAME Core Stubs** (`src/mame_core/`):
+**Key Architecture Decisions**:
+- **Why osd_common_t**: Provides audio callback infrastructure and module system that MAME expects
+- **Why not headless**: MAME's architecture requires OSD modules even for audio-only operation
+- **Screen Device**: Required for audio timing (MAME's sound system driven by screen refresh)
+- **CPU Device**: RP2A03 (NES CPU) drives MAME's scheduler and provides integrated APU
+
+**MAME Core Components** (`src/mame_core/`):
+- `minimal_osd.{cpp,h}` - OSD implementation inheriting from `osd_common_t`
+- `audio_synth_driver.cpp` - MAME driver definition for audio synthesizer machine
 - `debug_stub.cpp` - Minimal debugger/driver list implementations
 - `emulator_stub.cpp` - Emulator info stubs
-- `mame_stubs.cpp` - Stubs for video layouts, network, AVI, hash functions
-- `osd_stub.cpp` - Operating System Dependent layer stubs
+- `osd_stubs.cpp` - Stubs for unused OSD features (network, AVI, layouts)
 - `softfloat_wrapper.cpp` - C/C++ linkage bridge for SoftFloat library
-- `mame_minimal.h/cpp` - Compatibility layer between audio device manager and MAME types
 
 ## References and Related Projects
 
@@ -268,17 +287,23 @@ GPL-2.0 (required for MAME integration) - see `LICENSING.md` for details.
 
 ## Current Status
 
-**Phase 6 In Progress**: Full MAME integration with comprehensive subsystem support:
+**Phase 6 In Progress**: Full MAME OSD integration with proper module system:
 - ✅ Complete MAME build integration (60+ source files)
 - ✅ Audio, memory, debug, video, and utility subsystems
 - ✅ SoftFloat, FLAC, ZSTD, LZMA compression libraries
 - ✅ Minimal stubs for unused features (network, layouts, drivers)
 - ✅ C/C++ linkage compatibility wrappers
 - ✅ Successful build of 38MB mame_synth executable
-- 🔄 Runtime MAME device initialization (in progress)
+- ✅ OSD architecture: Switched from osd_interface to osd_common_t
+- ✅ Machine manager with http_manager and ui_manager support
+- ✅ RP2A03 CPU device for scheduler, screen device for audio timing
+- 🔄 OSD module initialization (sound, video, input modules) - in progress
+- ⏳ Audio capture via sound_stream_sink_update() callback
 - ⏳ Full NES APU playback testing
 - ⏳ Interactive CLI with MAME backend
 - ⏳ Test suite compatibility with MAME integration
+
+**Current Focus**: Implementing proper OSD module registration and initialization. MAME's osd_common_t requires sound_module, video_module, and input_module infrastructure. Following MAmidiMEmo's approach of full OSD integration rather than headless operation.
 
 **Previous Achievements** (Phase 5):
 - ✅ Complete NES APU implementation with all 5 channels

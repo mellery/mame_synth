@@ -5,6 +5,7 @@
 #include <cctype>
 #include <sstream>
 #include <cmath>
+#include <map>
 
 #ifdef HAVE_PUGIXML
 #include <pugixml.hpp>
@@ -141,6 +142,9 @@ bool midi_parser::parse_track_chunk(const uint8_t* data, size_t size, music_data
     music_time_t current_time = 0;
     uint8_t running_status = 0;
 
+    // Track active notes: key = (channel << 8) | note, value = {start_time, velocity}
+    std::map<uint16_t, std::pair<music_time_t, uint8_t>> active_notes;
+
     while (remaining > 0) {
         // Read delta time
         uint32_t delta_time = read_variable_length(current, remaining);
@@ -169,19 +173,47 @@ bool midi_parser::parse_track_chunk(const uint8_t* data, size_t size, music_data
             uint8_t note = current[0];
             uint8_t velocity = current[1];
 
+            uint16_t note_key = (channel << 8) | note;
+
             if (velocity > 0) {
-                // TODO: Handle note duration properly by tracking note off events
-                // For now, use a default duration
-                music_note music_note(channel, note, velocity, current_time, 480);
-                output.add_note(music_note);
+                // Store note start time and velocity
+                active_notes[note_key] = {current_time, velocity};
+            } else {
+                // Velocity 0 is equivalent to Note Off
+                auto it = active_notes.find(note_key);
+                if (it != active_notes.end()) {
+                    music_time_t start_time = it->second.first;
+                    uint8_t note_velocity = it->second.second;
+                    music_time_t duration = current_time - start_time;
+
+                    music_note music_note(channel, note, note_velocity, start_time, duration);
+                    output.add_note(music_note);
+                    active_notes.erase(it);
+                }
             }
 
             current += 2;
             remaining -= 2;
         }
         else if ((status_byte & 0xF0) == 0x80) {
-            // Note Off - skip for now, duration handling will be improved later
+            // Note Off
             if (remaining < 2) break;
+            uint8_t channel = status_byte & 0x0F;
+            uint8_t note = current[0];
+            // uint8_t velocity = current[1];  // Note off velocity (usually ignored)
+
+            uint16_t note_key = (channel << 8) | note;
+            auto it = active_notes.find(note_key);
+            if (it != active_notes.end()) {
+                music_time_t start_time = it->second.first;
+                uint8_t note_velocity = it->second.second;
+                music_time_t duration = current_time - start_time;
+
+                music_note music_note(channel, note, note_velocity, start_time, duration);
+                output.add_note(music_note);
+                active_notes.erase(it);
+            }
+
             current += 2;
             remaining -= 2;
         }

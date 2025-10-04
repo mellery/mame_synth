@@ -22,3 +22,4 @@ debug_stdin
 test_interactive
 validate_wav_fixes
 simple_wav_test_manual
+.venv/

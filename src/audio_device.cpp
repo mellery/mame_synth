@@ -115,8 +115,9 @@ void nes_apu_device::reset() {
 void nes_apu_device::shutdown() {
     if (!m_initialized) return;
 
-    // Reset first
-    reset();
+    // DON'T reset during shutdown - this disables all channels via $4015=$00
+    // Just clean up without touching the hardware state
+    // The MAME machine will handle cleanup when it's destroyed
 
     // Shutdown MAME device
     if (m_mame_device) {
@@ -354,18 +355,23 @@ void nes_apu_device::sync_to_mame_device() {
     // Sync pulse channels
     for (int i = 0; i < 2; ++i) {
         if (m_channels[i].active) {
+            std::cout << "SYNC: Pulse channel " << i << " is active, writing registers..." << std::endl;
             // Control register (duty cycle and volume)
             uint8_t control_value = 0x40 | (m_pulse_duty[i] << 6) | m_channels[i].volume;
             m_mame_device->write_register(i * 4, control_value);
+            std::cout << "SYNC: Wrote control=$" << std::hex << (int)control_value << std::dec << std::endl;
 
             // Timer low byte - use pulse-specific mapping
             uint16_t timer = m_note_mapper ?
                 m_note_mapper->note_to_timer(m_channels[i].note_number, nes_note_mapping::nes_note_mapper::channel_type_t::PULSE) :
                 note_to_nes_frequency(m_channels[i].note_number);
+            std::cout << "SYNC: Timer value = " << timer << std::endl;
             m_mame_device->write_register(i * 4 + 2, timer & 0xFF);
+            std::cout << "SYNC: Wrote timer low" << std::endl;
 
             // Timer high byte with length counter
             m_mame_device->write_register(i * 4 + 3, (timer >> 8) | 0xF8);
+            std::cout << "SYNC: Wrote timer high" << std::endl;
         }
     }
 
@@ -391,21 +397,27 @@ void nes_apu_device::sync_to_mame_device() {
 
     // Sync noise channel
     if (m_channels[3].active) {
-        // Volume/envelope register
-        uint8_t noise_control = m_channels[3].volume;
+        std::cout << "SYNC: Noise channel is active, writing registers..." << std::endl;
+        // Volume/envelope register ($400C)
+        // Bit 4: Constant volume flag (1 = use bits 0-3 as volume, 0 = use envelope)
+        // Bits 0-3: Volume/envelope divider period
+        uint8_t noise_control = 0x30 | m_channels[3].volume;  // Set constant volume flag + length counter halt
         if (m_noise_short_mode) {
             noise_control |= 0x80;
         }
         m_mame_device->write_register(0x0C, noise_control);
+        std::cout << "SYNC: Wrote noise control=$" << std::hex << (int)noise_control << std::dec << std::endl;
 
         // Noise period register - map note to period
         uint8_t noise_period = m_note_mapper ?
             m_note_mapper->note_to_noise_period(m_channels[3].note_number) :
             0x0F; // Default to highest frequency
         m_mame_device->write_register(0x0E, noise_period | (m_noise_short_mode ? 0x80 : 0x00));
+        std::cout << "SYNC: Wrote noise period=$" << std::hex << (int)noise_period << std::dec << std::endl;
 
         // Length counter register
         m_mame_device->write_register(0x0F, 0xF8);
+        std::cout << "SYNC: Wrote noise length counter" << std::endl;
     }
 
     // Enable all active channels

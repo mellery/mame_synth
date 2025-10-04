@@ -94,6 +94,7 @@ set(PROJECT_SOURCES
     src/mame_core/emulator_stub.cpp
     src/mame_core/softfloat_wrapper.cpp
     src/mame_core/minimal_osd.cpp
+    src/mame_core/sound_capture.cpp
     src/mame_core/mame_midi_player.cpp
     src/mame_core/osd_stubs.cpp
     src/mame_core/nanosvg_impl.cpp
@@ -130,6 +131,7 @@ set(MAME_CORE_SOURCES
     ${MAME_DIR}/src/emu/mconfig.cpp
     ${MAME_DIR}/src/emu/validity.cpp
     ${MAME_DIR}/src/emu/xtal.cpp
+    ${MAME_DIR}/src/emu/profiler.cpp
     # Video subsystem - needed by machine.cpp even for audio-only
     ${MAME_DIR}/src/emu/video.cpp
     ${MAME_DIR}/src/emu/screen.cpp
@@ -394,13 +396,23 @@ set(MAME_DEVICE_SOURCES
 # Combine all MAME sources
 set(MAME_SOURCES ${MAME_CORE_SOURCES} ${MAME_DEVICE_SOURCES} ${MAME_3RDPARTY_SOURCES} ${AUDIO_SYNTH_SOURCES})
 
-# Create main executable
-add_executable(mame_synth ${PROJECT_SOURCES} ${MAME_SOURCES})
+# Create MAME static library (so it doesn't get recompiled on every clean build)
+add_library(mame_core STATIC ${MAME_SOURCES})
+target_link_libraries(mame_core z jpeg png pthread)
+target_include_directories(mame_core PRIVATE
+    ${MAME_DIR}/src
+    ${MAME_DIR}/src/emu
+    ${MAME_DIR}/src/devices
+    ${MAME_DIR}/src/devices/cpu
+)
 
-# Link compression, image, and threading libraries
-target_link_libraries(mame_synth z jpeg png pthread)
+# Create main executable (only PROJECT_SOURCES - our 30 files)
+add_executable(mame_synth ${PROJECT_SOURCES})
 
-# Add MAME include directories
+# Link MAME library and other dependencies
+target_link_libraries(mame_synth mame_core pthread)
+
+# Add include directories for main executable
 target_include_directories(mame_synth PRIVATE
     ${MAME_DIR}/src
     ${MAME_DIR}/src/emu

@@ -268,15 +268,12 @@ bool nes_sequencer::play_from_time(music_time_t start_time) {
     m_playback_start_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
     m_playback_state = playback_state::PLAYING;
 
-    // Schedule initial events
-    auto lookahead_ticks = (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
-                           (m_microseconds_per_quarter.load() / 1000);
-    schedule_events_for_time(start_time, lookahead_ticks);
+    // Events are already in queue from generate_events_from_music_data()
+    // Don't schedule again to avoid duplicates
 
     if (g_debug_config.log_timing_info) {
         std::stringstream ss;
         ss << "Playback started: tick=" << start_time
-           << ", lookahead=" << lookahead_ticks << " ticks"
            << ", total_notes=" << m_music_data.notes().size()
            << ", queue_size=" << m_event_queue.size();
         DEBUG_LOG_TIMING(ss.str());
@@ -465,7 +462,9 @@ nes_sequencer::sequencer_stats nes_sequencer::get_stats() const {
 void nes_sequencer::sequencer_thread_proc() {
 
     while (m_thread_running) {
-        if (m_playback_state == playback_state::PLAYING && m_thread_running) {
+        // In offline rendering mode, the pre-process callback handles all event processing
+        // The thread should not process events to avoid racing with the callback
+        if (m_playback_state == playback_state::PLAYING && m_thread_running && !m_config.offline_rendering) {
             process_events();
 
             // Check exit condition again after processing
@@ -491,8 +490,8 @@ void nes_sequencer::sequencer_thread_proc() {
 }
 
 void nes_sequencer::process_events() {
-    // Check if we should exit early
-    if (!m_thread_running) {
+    // Check if we should exit early (except in offline mode where we're called directly)
+    if (!m_thread_running && !m_config.offline_rendering) {
         return;
     }
 
@@ -518,8 +517,8 @@ void nes_sequencer::process_events() {
     // Process note-offs for expired notes
     process_note_offs();
 
-    // Check exit condition again
-    if (!m_thread_running) {
+    // Check exit condition again (except in offline mode where we're called directly)
+    if (!m_thread_running && !m_config.offline_rendering) {
         return;
     }
 
@@ -537,8 +536,20 @@ void nes_sequencer::process_events() {
         logged_first = true;
     }
 
-    while (!m_event_queue.empty() && m_thread_running) {
-        const auto& event = m_event_queue.top();
+    // Process events (allow in offline mode even without thread)
+    static int loop_iter = 0;
+    while (!m_event_queue.empty() && (m_thread_running || m_config.offline_rendering)) {
+        // IMPORTANT: Copy the event, don't use reference! Otherwise pop() invalidates it
+        const auto event = m_event_queue.top();
+
+        // Debug: log first few iterations
+        if (loop_iter < 5) {
+            const char* type_str = (event.type == event_type::NOTE_ON) ? "NOTE_ON" :
+                                   (event.type == event_type::NOTE_OFF) ? "NOTE_OFF" : "OTHER";
+            fprintf(stderr, "LOOP_ITER #%d: queue_top is %s at tick=%d, processing_tick=%d\n",
+                loop_iter, type_str, event.tick_time, processing_tick);
+            loop_iter++;
+        }
 
         // In offline mode, compare based on tick time with lookahead, not wall-clock time
         bool should_process = false;
@@ -549,17 +560,28 @@ void nes_sequencer::process_events() {
         }
 
         if (!should_process) {
+            if (loop_iter < 5) {
+                fprintf(stderr, "LOOP_ITER #%d: should_process=FALSE, breaking\n", loop_iter);
+            }
             break;
         }
+
+        // Debug: confirm we're about to pop and process THIS event
+        if (loop_iter <= 5) {
+            const char* type_str2 = (event.type == event_type::NOTE_ON) ? "NOTE_ON" :
+                                    (event.type == event_type::NOTE_OFF) ? "NOTE_OFF" : "OTHER";
+            fprintf(stderr, "LOOP_ITER #%d: about to pop and process %s at tick=%d\n",
+                loop_iter - 1, type_str2, event.tick_time);
+        }
+
         m_event_queue.pop();
 
         process_event(event);
         track_event_latency(event);
     }
-    // Schedule more events if needed
-    auto lookahead_ticks = (m_config.lookahead_ms * m_config.ticks_per_quarter_note) /
-                          (m_microseconds_per_quarter.load() / 1000);
-    schedule_events_for_time(current_tick, lookahead_ticks);
+
+    // Note: Events are pre-scheduled by generate_events_from_music_data() when music loads
+    // No need for progressive scheduling since all events are already in the queue
 
     // Check for loop condition
     if (m_loop_enabled && current_tick >= m_loop_end) {
@@ -657,6 +679,25 @@ void nes_sequencer::schedule_events_for_time(music_time_t current_tick, music_ti
 }
 
 void nes_sequencer::process_event(const sequencer_event& event) {
+    static int event_count = 0;
+    const char* type_str = (event.type == event_type::NOTE_ON) ? "NOTE_ON" :
+                           (event.type == event_type::NOTE_OFF) ? "NOTE_OFF" : "OTHER";
+    if (event_count < 20) {
+        if (event.type == event_type::NOTE_ON) {
+            fprintf(stderr, "PROC_EVENT #%d: %s tick=%d ch=%d note=%d dur=%d\n",
+                event_count, type_str, event.tick_time, event.data.note_event.channel,
+                event.data.note_event.note, event.data.note_event.duration);
+        } else if (event.type == event_type::NOTE_OFF) {
+            fprintf(stderr, "PROC_EVENT #%d: %s tick=%d ch=%d note=%d\n",
+                event_count, type_str, event.tick_time, event.data.note_event.channel,
+                event.data.note_event.note);
+        } else {
+            fprintf(stderr, "PROC_EVENT #%d: %s tick=%d\n",
+                event_count, type_str, event.tick_time);
+        }
+        event_count++;
+    }
+
     switch (event.type) {
         case event_type::NOTE_ON:
             trigger_note(event.data.note_event.channel, event.data.note_event.note,
@@ -792,6 +833,14 @@ void nes_sequencer::generate_events_from_music_data() {
     for (const auto& note : m_music_data.notes()) {
         // Only add if channel is enabled and not muted
         if (is_channel_enabled(note.channel) && !is_channel_muted(note.channel)) {
+            // DEBUG: Log note details
+            static int note_count = 0;
+            if (note_count < 10) {
+                fprintf(stderr, "GEN_EVENT #%d: ch=%d note=%d start=%d duration=%d end=%d\n",
+                    note_count, note.channel, note.note, note.start, note.duration, note.start + note.duration);
+                note_count++;
+            }
+
             // Create note on event using the static constructor
             auto note_on = sequencer_event::note_on(
                 tick_to_real_time(note.start), note.start,

@@ -44,6 +44,7 @@ public:
 
     // Audio source management
     void set_callback(audio_callback_t callback);
+    void set_pre_process_callback(post_process_callback_t callback);   // For event processing before audio generation
     void set_post_process_callback(post_process_callback_t callback);  // For offline rendering sample counting
     void set_audio_manager(audio_device_manager* manager);
 
@@ -68,6 +69,7 @@ public:
 private:
     config m_config;
     audio_callback_t m_callback;
+    post_process_callback_t m_pre_process_callback;
     post_process_callback_t m_post_process_callback;
     audio_device_manager* m_audio_manager = nullptr;
 

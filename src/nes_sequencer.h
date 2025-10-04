@@ -89,8 +89,17 @@ public:
                                           uint32_t microseconds_per_quarter);
 
         // Comparison for priority queue (earliest events first)
+        // Use tick_time for proper ordering (works for both real-time and offline)
+        // When tick_time is equal, prioritize NOTE_ON before NOTE_OFF
         bool operator>(const sequencer_event& other) const {
-            return scheduled_time > other.scheduled_time;
+            if (tick_time != other.tick_time) {
+                return tick_time > other.tick_time;
+            }
+            // Same tick: NOTE_OFF (1) should come after NOTE_ON (0)
+            // So NOTE_OFF > NOTE_ON in priority (NOTE_ON processed first)
+            int this_priority = (type == event_type::NOTE_OFF) ? 1 : 0;
+            int other_priority = (other.type == event_type::NOTE_OFF) ? 1 : 0;
+            return this_priority > other_priority;
         }
     };
 
@@ -151,6 +160,7 @@ public:
     // Offline rendering support
     void set_offline_rendering(bool enabled);    // Enable sample-based timing instead of wall-clock
     void advance_samples(uint32_t num_samples);  // Advance sample counter for offline mode
+    void process_events();                        // Process scheduled events (public for offline mode)
 
     void set_tempo_scale(double scale); // 1.0 = normal, 2.0 = double speed, 0.5 = half speed
     double get_tempo_scale() const { return m_tempo_scale; }
@@ -252,7 +262,6 @@ private:
 
     // Internal methods
     void sequencer_thread_proc();
-    void process_events();
     void schedule_events_for_time(music_time_t current_tick, music_time_t lookahead_ticks);
     void process_event(const sequencer_event& event);
 

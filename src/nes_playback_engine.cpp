@@ -822,7 +822,9 @@ bool nes_playback_engine::initialize_audio_system() {
         m_audio_manager = std::make_unique<nes_enhanced_audio_manager>();
 
         // Create NES APU device
-        auto nes_device = std::make_unique<nes_apu_device>("nes_apu", 1789773);
+        // Use the RP2A03 CPU's integrated NES APU device (tag: "maincpu:nesapu")
+        // The RP2A03 creates this automatically, so we reference it instead of creating a new one
+        auto nes_device = std::make_unique<nes_apu_device>("maincpu:nesapu", 1789773);
         m_audio_manager->add_device(std::move(nes_device));
 
         // Initialize with configured mixer settings
@@ -1153,7 +1155,7 @@ void nes_playback_engine::set_pulse_duty_cycle(uint8_t channel, uint8_t duty) {
     }
 
     // Get the NES APU device and set duty cycle
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("maincpu:nesapu"));
     if (nes_device) {
         nes_device->set_pulse_duty_cycle(channel, duty);
         log_debug("Set pulse channel " + std::to_string(channel) + " duty cycle to " + std::to_string(duty));
@@ -1171,7 +1173,7 @@ void nes_playback_engine::set_triangle_linear_counter(uint8_t value) {
     value = std::min(value, uint8_t(127));
 
     // Get the NES APU device and set triangle linear counter
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("maincpu:nesapu"));
     if (nes_device) {
         nes_device->set_triangle_linear_counter(value);
         log_debug("Set triangle linear counter to " + std::to_string(value));
@@ -1186,7 +1188,7 @@ void nes_playback_engine::set_noise_mode(bool short_mode) {
     }
 
     // Get the NES APU device and set noise mode
-    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("nes_apu"));
+    auto* nes_device = dynamic_cast<nes_apu_device*>(m_audio_manager->get_device("maincpu:nesapu"));
     if (nes_device) {
         nes_device->set_noise_mode(short_mode);
         log_debug("Set noise mode to " + std::string(short_mode ? "short" : "long"));
@@ -1315,9 +1317,12 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             this->audio_callback(buffer, frames);
         });
 
-        // Set up post-process callback to advance sample count for offline timing
-        export_stream->set_post_process_callback([this](size_t frames) {
+        // Set up pre-process callback to process events and advance sample count BEFORE audio generation
+        export_stream->set_pre_process_callback([this](size_t frames) {
             if (m_sequencer) {
+                // Process events at current position first
+                m_sequencer->process_events();
+                // Then advance sample count for next iteration
                 m_sequencer->advance_samples(static_cast<uint32_t>(frames));
             }
         });
@@ -1386,6 +1391,11 @@ bool nes_playback_engine::export_to_wav(const std::string& filename, uint32_t sa
             m_audio_stream.reset();
             if (was_running) play();
             return false;
+        }
+
+        // Process initial events at tick 0 before any audio callbacks run
+        if (m_sequencer) {
+            m_sequencer->process_events();
         }
 
         // Wait for sequencer to complete, using both position tracking and timeout

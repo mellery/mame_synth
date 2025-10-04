@@ -14,6 +14,7 @@
 #include "speaker.h"
 #include "sound/nes_apu.h"
 #include "cpu/m6502/rp2a03.h"  // NES CPU with integrated APU (RP2A03 = Ricoh version of N2A03)
+#include "screen.h"  // For screen device (needed to drive audio timing)
 #include "layout/generic.h"  // For layout_noscreens
 
 //**************************************************************************
@@ -42,6 +43,13 @@ protected:
 
 	void audio_synth_map(address_map &map);
 
+	// Dummy screen update - just returns 0 (no actual drawing)
+	// The screen device is only needed to drive audio timing
+	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
+	{
+		return 0;
+	}
+
 private:
 	required_device<cpu_device> m_maincpu;
 };
@@ -67,18 +75,32 @@ void audio_synth_state::audio_synth(machine_config &config)
 	// This layout shows "No screens attached" message but doesn't crash
 	config.set_default_layout(layout_noscreens);
 
-	// Add RP2A03 CPU (NES CPU with integrated APU)
-	// The CPU needs to run to drive MAME's scheduler and audio generation
-	RP2A03(config, m_maincpu, NTSC_APU_CLOCK);  // NTSC NES CPU clock (1.789773 MHz)
-	m_maincpu->set_addrmap(AS_PROGRAM, &audio_synth_state::audio_synth_map);
+	// Add dummy screen device - CRITICAL for audio timing!
+	// MAME's sound system is driven by screen refresh, even for audio-only applications
+	// Without a screen, sound_stream::update() is never called and audio stays silent
+	// This follows MAmidiMEmo's approach (see vsnes.cpp)
+	screen_device &screen(SCREEN(config, "screen", SCREEN_TYPE_RASTER));
+	screen.set_refresh_hz(60);  // 60Hz refresh drives audio generation
+	screen.set_size(256, 240);  // Dummy NES resolution
+	screen.set_visarea(0, 255, 0, 239);
+	screen.set_screen_update(FUNC(audio_synth_state::screen_update));
 
 	// Add speakers for audio output
-	SPEAKER(config, "lspeaker").front_left();
-	SPEAKER(config, "rspeaker").front_right();
+	// CRITICAL: Use MONO speaker like MAmidiMEmo - stereo may not route to OSD properly!
+	SPEAKER(config, "mono").front_center();
 
-	// Add single NES APU device with standard NES APU clock rate (1.789773 MHz for NTSC)
-	// Tag: "nes_apu" - provides 5 channels (2 pulse, 1 triangle, 1 noise, 1 DMC)
-	NES_APU(config, "nes_apu", 1789773).add_route(ALL_OUTPUTS, "lspeaker", 0.50).add_route(ALL_OUTPUTS, "rspeaker", 0.50);
+	// Add RP2A03G CPU (NES CPU with integrated NES_APU)
+	// Try using RP2A03G which uses NES_APU instead of APU_2A03
+	// The CPU needs to run to drive MAME's scheduler and audio generation
+	rp2a03_device &cpu(RP2A03G(config, m_maincpu, NTSC_APU_CLOCK));  // NTSC NES CPU clock (1.789773 MHz)
+	cpu.set_addrmap(AS_PROGRAM, &audio_synth_state::audio_synth_map);
+
+	// Route from CPU mixer to speaker
+	// The RP2A03 is a device_mixer_interface that receives from APU and should output
+	cpu.add_route(ALL_OUTPUTS, "mono", 0.50);
+
+	// NOTE: The RP2A03G creates its own internal NES_APU device with tag "maincpu:nesapu"
+	// The APU routes to the RP2A03 mixer (configured in rp2a03g_device::device_add_mconfig)
 }
 
 //**************************************************************************
@@ -86,6 +108,12 @@ void audio_synth_state::audio_synth(machine_config &config)
 //**************************************************************************
 
 ROM_START( audiosynth )
+	ROM_REGION( 0x10000, "maincpu", 0 )
+	// Simple 6502 infinite loop at reset vector
+	// This keeps the CPU executing so the scheduler stays active
+	ROM_FILL( 0x0000, 0x10000, 0xEA )  // Fill with NOP instructions
+	ROM_FILL( 0xFFFC, 2, 0x00 )        // Reset vector points to $0000
+	ROM_FILL( 0xFFFD, 1, 0x00 )
 ROM_END
 
 //**************************************************************************

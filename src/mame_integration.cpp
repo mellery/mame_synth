@@ -42,6 +42,15 @@ bool mame_machine_context::initialize() {
         m_options = new osd_options();
         m_options->set_value(OPTION_SAMPLERATE, std::to_string(m_sample_rate), OPTION_PRIORITY_CMDLINE);
 
+        // Enable MAME's built-in debugging/logging
+        m_options->set_value(OPTION_VERBOSE, "1", OPTION_PRIORITY_CMDLINE);
+        m_options->set_value(OPTION_LOG, "1", OPTION_PRIORITY_CMDLINE);
+        std::cout << "  Enabled MAME verbose logging and debug output" << std::endl;
+
+        // Set volume to max (0 = max, -32 = silent in MAME)
+        m_options->set_value(OPTION_VOLUME, "0", OPTION_PRIORITY_CMDLINE);
+        std::cout << "  Set MAME volume to 0 (maximum)" << std::endl;
+
         // 2. Create minimal OSD interface (now inherits from osd_common_t)
         std::cout << "  Creating minimal OSD interface (osd_common_t-based)..." << std::endl;
         m_osd = new minimal_osd_interface(*m_options);
@@ -389,8 +398,13 @@ void mame_nes_apu_device::write_register(uint32_t offset, uint8_t value) {
         return;
     }
 
-    std::cout << "MAME NES APU: Writing $" << std::hex << static_cast<int>(value)
-              << " to register $" << std::hex << offset << std::dec << std::endl;
+    static int write_count = 0;
+    if (write_count < 5) {
+        std::cout << "MAME NES APU: Writing $" << std::hex << static_cast<int>(value)
+                  << " to register $" << std::hex << offset << std::dec;
+        std::cout << " (device started: " << (m_apu->started() ? "YES" : "NO") << ")" << std::endl;
+        write_count++;
+    }
 
     // Debug logging for register writes
     if (g_debug_config.log_register_writes) {
@@ -444,6 +458,12 @@ uint8_t mame_nes_apu_device::read_register(uint32_t offset) const {
 }
 
 void mame_nes_apu_device::update_audio_stream(int16_t* buffer, size_t sample_count) {
+    static int update_count = 0;
+    if (update_count < 10) {
+        std::cerr << "*** update_audio_stream #" << update_count << " called, sample_count=" << sample_count << " ***" << std::endl;
+        update_count++;
+    }
+
     if (!m_initialized || !m_apu) {
         // Fill with silence
         std::memset(buffer, 0, sample_count * sizeof(int16_t));
@@ -596,6 +616,22 @@ nesapu_device* mame_nes_apu_device::get_nes_apu_device() {
 // OSD audio callback handler - called by MAME's sound_manager via OSD
 void mame_nes_apu_device::on_audio_callback(const int16_t* buffer, int sample_count) {
     std::lock_guard<std::mutex> lock(m_buffer_mutex);
+
+    // DEBUG: Check if callback is being called and verify buffer content
+    static int debug_count = 0;
+    if (debug_count < 10) {
+        // Check max sample value to see if we're getting the test sine wave
+        int16_t max_sample = 0;
+        for (int i = 0; i < sample_count; i++) {
+            if (std::abs(buffer[i]) > std::abs(max_sample)) {
+                max_sample = buffer[i];
+            }
+        }
+        std::cerr << "*** on_audio_callback #" << debug_count
+                  << ": samples=" << sample_count
+                  << ", max=" << max_sample << " ***" << std::endl;
+        debug_count++;
+    }
 
     // Write samples to ring buffer
     for (int i = 0; i < sample_count; i++) {

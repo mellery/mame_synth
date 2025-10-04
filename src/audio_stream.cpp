@@ -149,6 +149,11 @@ void audio_stream::set_callback(audio_callback_t callback) {
     m_callback = callback;
 }
 
+void audio_stream::set_pre_process_callback(post_process_callback_t callback) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_pre_process_callback = callback;
+}
+
 void audio_stream::set_post_process_callback(post_process_callback_t callback) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_post_process_callback = callback;
@@ -192,6 +197,11 @@ void audio_stream::audio_thread_proc() {
         // Get current write buffer
         size_t write_idx = m_write_buffer.load();
         auto& buffer = m_buffers[write_idx];
+
+        // Call pre-process callback BEFORE generating audio (for event processing)
+        if (m_pre_process_callback) {
+            m_pre_process_callback(m_config.buffer_size);
+        }
 
         // Process audio
         process_audio_buffer(buffer.data(), m_config.buffer_size);
